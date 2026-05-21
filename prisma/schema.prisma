@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  integrations CloudIntegration[]
+  analyses     BillingAnalysis[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model CloudIntegration {
+  id           String      @id @default(cuid())
+  userId       String
+  provider     CloudProvider
+  name         String
+  encryptedKey String
+  region       String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("cloud_integrations")
+}
+
+model BillingAnalysis {
+  id         String   @id @default(cuid())
+  userId     String
+  provider   String
+  fileName   String?
+  totalCost  Float
+  currency   String   @default("USD")
+  periodStart DateTime
+  periodEnd   DateTime
+  result     Json
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("billing_analyses")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum CloudProvider {
+  AWS
+  GCP
+  AZURE
+  OCI
+}
