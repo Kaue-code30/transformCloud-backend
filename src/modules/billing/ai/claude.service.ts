@@ -6,6 +6,7 @@ import type {
   MappingResult,
   ClassificationResult,
   RecommendationResult,
+  MulticloudResult,
 } from '../types/pipeline.types';
 import type { AvailableCatalog } from '../pricing/catalog-fetcher.service';
 
@@ -43,6 +44,26 @@ Responda SEMPRE em JSON válido conforme o schema solicitado. Sem texto extra fo
     if (!parsed) {
       this.logger.error('Resposta de mapeamento não é JSON válido');
       return { mappings: [] };
+    }
+
+    return parsed;
+  }
+
+  // ─── Etapa 7: Análise multicloud ─────────────────────────────────────────────
+
+  async generateMulticloudAnalysis(
+    billing: ParsedBilling,
+    prices: ClassificationResult,
+    singleProviderSaving: number,
+  ): Promise<MulticloudResult> {
+    const prompt = buildMulticloudPrompt(billing, prices, singleProviderSaving);
+    const raw = await this.ask(prompt, 3000);
+    if (!raw) return fallbackMulticloud(billing, prices, singleProviderSaving);
+
+    const parsed = safeParseJson<MulticloudResult>(raw);
+    if (!parsed) {
+      this.logger.error('Resposta multicloud não é JSON válido');
+      return fallbackMulticloud(billing, prices, singleProviderSaving);
     }
 
     return parsed;
@@ -322,5 +343,124 @@ function fallbackRecommendation(): RecommendationResult {
     },
     insights: [],
     summary: 'Não foi possível gerar recomendação.',
+  };
+}
+
+function buildMulticloudPrompt(
+  billing: ParsedBilling,
+  prices: ClassificationResult,
+  singleProviderSaving: number,
+): string {
+  const serviceLines = prices.classified
+    .map((c) => {
+      const entries = [
+        c.gcp.estimatedMonthly  != null ? `GCP=${billing.currency}${c.gcp.estimatedMonthly.toFixed(2)}` : null,
+        c.azure.estimatedMonthly != null ? `Azure=${billing.currency}${c.azure.estimatedMonthly.toFixed(2)}` : null,
+        c.aws.estimatedMonthly  != null ? `AWS=${billing.currency}${c.aws.estimatedMonthly.toFixed(2)}` : null,
+        c.oci.estimatedMonthly  != null ? `OCI=${billing.currency}${c.oci.estimatedMonthly.toFixed(2)}` : null,
+      ].filter(Boolean).join(' | ');
+      return `- ${c.service}: atual=${billing.currency}${c.currentCost} | ${entries || 'sem preços verificados'}`;
+    })
+    .join('\n');
+
+  return `Analise o cenário MULTICLOUD OTIMIZADO para este cliente.
+
+Bill atual (${billing.provider}):
+- Custo total: ${billing.currency} ${billing.totalCost}/mês
+- Economia já identificada com single-provider: ${billing.currency} ${singleProviderSaving.toFixed(2)}/mês
+
+Preços verificados por serviço:
+${serviceLines}
+
+TAREFA: Para cada serviço com ao menos um preço verificado, escolha o provedor mais barato.
+Considere:
+1. Serviços de banco de dados preferem ficar no mesmo provedor que compute (latência)
+2. Cache/Redis e banco devem estar no mesmo provedor que a aplicação que os usa
+3. Storage (S3/Blob) tem custo de egress ao sair da cloud — penalize migrações de storage se compute ficar em outro provedor
+4. Se a diferença de custo entre o melhor e o segundo melhor for < 10%, prefira o mesmo provedor (complexidade não vale)
+
+Retorne JSON no formato exato:
+{
+  "totalEstimatedMonthlyCost": <número>,
+  "totalMonthlySaving": <número>,
+  "savingPct": <número inteiro>,
+  "coveredServices": <número>,
+  "allocations": [
+    {
+      "service": "<nome>",
+      "currentCost": <número>,
+      "recommendedProvider": "AWS|GCP|AZURE|OCI",
+      "estimatedMonthlyCost": <número>,
+      "saving": <número>,
+      "reason": "<1 frase explicando a escolha>"
+    }
+  ],
+  "tradeoffs": {
+    "egressCostWarning": "<aviso sobre custos de egress entre clouds, se aplicável>",
+    "operationalComplexity": "<impacto operacional: ex: 2 clouds = +X horas/mês de overhead>",
+    "recommendation": "<recomenda multicloud ou single-provider neste caso, com justificativa>"
+  },
+  "vsSingleProvider": {
+    "singleProviderSaving": ${singleProviderSaving.toFixed(2)},
+    "multicloudExtraSaving": <diferença adicional vs single-provider>,
+    "worthIt": <true se economia extra > complexidade operacional, false caso contrário>,
+    "justification": "<1-2 frases comparando os dois cenários>"
+  }
+}`;
+}
+
+function fallbackMulticloud(
+  billing: ParsedBilling,
+  prices: ClassificationResult,
+  singleProviderSaving: number,
+): MulticloudResult {
+  // Calcula o melhor provedor por serviço de forma determinística (sem Claude)
+  const allocations = prices.classified
+    .map((c) => {
+      const options: Array<{ provider: string; cost: number }> = [
+        { provider: 'GCP',   cost: c.gcp.estimatedMonthly   ?? Infinity },
+        { provider: 'AZURE', cost: c.azure.estimatedMonthly ?? Infinity },
+        { provider: 'AWS',   cost: c.aws.estimatedMonthly   ?? Infinity },
+        { provider: 'OCI',   cost: c.oci.estimatedMonthly   ?? Infinity },
+      ].filter((o) => o.cost < Infinity);
+
+      if (!options.length) return null;
+
+      const best = options.reduce((a, b) => (a.cost < b.cost ? a : b));
+      return {
+        service: c.service,
+        currentCost: c.currentCost,
+        recommendedProvider: best.provider as import('../types/pipeline.types').CloudProvider,
+        estimatedMonthlyCost: best.cost,
+        saving: c.currentCost - best.cost,
+        reason: `Menor preço verificado entre os provedores disponíveis`,
+      };
+    })
+    .filter((a): a is NonNullable<typeof a> => a !== null);
+
+  const totalEstimated = allocations.reduce((s, a) => s + a.estimatedMonthlyCost, 0);
+  const totalSaving    = billing.totalCost - totalEstimated;
+  const savingPct      = billing.totalCost > 0 ? Math.round((totalSaving / billing.totalCost) * 100) : 0;
+  const extraSaving    = totalSaving - singleProviderSaving;
+
+  return {
+    totalEstimatedMonthlyCost: Number(totalEstimated.toFixed(2)),
+    totalMonthlySaving: Number(totalSaving.toFixed(2)),
+    savingPct,
+    coveredServices: allocations.length,
+    allocations,
+    tradeoffs: {
+      egressCostWarning: 'Verifique custos de egress entre clouds antes de dividir storage e compute.',
+      operationalComplexity: 'Múltiplos provedores aumentam a complexidade operacional — considere equipe e tooling.',
+      recommendation: extraSaving > 5000
+        ? 'Economia adicional expressiva justifica avaliar multicloud com PoC antes de decidir.'
+        : 'Diferença pequena — single-provider recomendado pela simplicidade operacional.',
+    },
+    vsSingleProvider: {
+      singleProviderSaving: Number(singleProviderSaving.toFixed(2)),
+      multicloudExtraSaving: Number(extraSaving.toFixed(2)),
+      worthIt: extraSaving > 5000,
+      justification: `Multicloud otimizado gera ${billing.currency}${extraSaving.toFixed(0)} a mais por mês vs single-provider. ${extraSaving > 5000 ? 'Vale avaliar.' : 'Complexidade não justifica a diferença.'}`,
+    },
   };
 }

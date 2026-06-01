@@ -159,6 +159,36 @@ export interface PaybackResult {
   };
 }
 
+// ─── Etapa 7: Multicloud ─────────────────────────────────────────────────────
+
+export interface MulticloudServiceAllocation {
+  service: string;
+  currentCost: number;
+  recommendedProvider: CloudProvider;
+  estimatedMonthlyCost: number;
+  saving: number;
+  reason: string;
+}
+
+export interface MulticloudResult {
+  totalEstimatedMonthlyCost: number;
+  totalMonthlySaving: number;
+  savingPct: number;
+  coveredServices: number;
+  allocations: MulticloudServiceAllocation[];
+  tradeoffs: {
+    egressCostWarning: string;
+    operationalComplexity: string;
+    recommendation: string;
+  };
+  vsSingleProvider: {
+    singleProviderSaving: number;
+    multicloudExtraSaving: number;
+    worthIt: boolean;
+    justification: string;
+  };
+}
+
 // ─── Resposta final ───────────────────────────────────────────────────────────
 
 export interface PipelineResult {
@@ -168,6 +198,7 @@ export interface PipelineResult {
   prices: ClassificationResult;
   recommendation: RecommendationResult;
   payback: PaybackResult;
+  multicloud: MulticloudResult;
 }
 
 // ─── SSE — eventos de progresso ──────────────────────────────────────────────
@@ -177,6 +208,7 @@ export type PipelineStep =
   | 'pricing'
   | 'classification'
   | 'recommendation'
+  | 'multicloud'
   | 'payback'
   | 'done'
   | 'error';

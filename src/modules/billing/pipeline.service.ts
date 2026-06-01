@@ -10,6 +10,7 @@ import type {
   ClassificationResult,
   RecommendationResult,
   PaybackResult,
+  MulticloudResult,
 } from './types/pipeline.types';
 
 @Injectable()
@@ -75,6 +76,15 @@ export class PipelineService {
             partial.prices,
             partial.recommendation,
           );
+
+          // Etapa 7: análise multicloud (em paralelo com o payback já calculado)
+          subscriber.next({ step: 'multicloud', message: 'Calculando cenário multicloud otimizado...' });
+          partial.multicloud = await this.claude.generateMulticloudAnalysis(
+            billingNormalized,
+            partial.prices,
+            partial.payback.payback.monthlySaving,
+          );
+
           const meta: PipelineResult['meta'] = {
             ...partial.prices.meta,
             analysisDate: new Date().toISOString(),
@@ -87,6 +97,7 @@ export class PipelineService {
             prices: partial.prices,
             recommendation: partial.recommendation,
             payback: partial.payback,
+            multicloud: partial.multicloud,
           };
 
           subscriber.next({
