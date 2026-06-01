@@ -1,6 +1,7 @@
 import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { OciMapping, PriceEntry } from '../types/pipeline.types';
+import { readCatalog } from '../catalog/catalog-sync.service';
 
 const OCI_PRICING_API = 'https://apexapps.oracle.com/pls/apex/cetools/api/v1/products/';
 // Flex shapes cobram OCPU e memória por separado — precisamos dos dois SKUs
@@ -217,22 +218,29 @@ export class OciPricingService {
     }) ?? null;
   }
 
-  // ─── Carregamento do catálogo completo ───────────────────────────────────
-  // A API OCI só suporta ?partNumber e ?currencyCode como filtros oficiais.
-  // Sem parâmetros ela retorna todos os produtos de uma vez — carregamos uma
-  // única vez por processo e cacheamos permanentemente.
+  // ─── Carregamento do catálogo ─────────────────────────────────────────────
+  // Prioridade: arquivo local (catalogs/oci.json) → API em tempo real (fallback)
 
   private loadCatalog(): Promise<OciProduct[]> {
     if (this.catalog) return Promise.resolve(this.catalog);
     if (this.catalogLoading) return this.catalogLoading;
 
     this.catalogLoading = (async () => {
-      this.logger.log('OCI: carregando catálogo completo...');
+      // 1. Tenta ler do arquivo gerado pelo CatalogSyncService
+      const cached = readCatalog<{ items: OciProduct[] }>('oci');
+      if (cached?.items?.length) {
+        this.logger.log(`OCI: usando catálogo local (${cached.items.length} produtos)`);
+        this.catalog = cached.items;
+        return cached.items;
+      }
+
+      // 2. Fallback: busca direta na API
+      this.logger.warn('OCI: arquivo de catálogo não encontrado, buscando diretamente na API...');
       const body = await httpsGet(OCI_PRICING_API, 60_000);
       const data = JSON.parse(body) as OciApiResponse;
       const all = data.items ?? [];
       this.catalog = all;
-      this.logger.log(`OCI catálogo completo: ${all.length} produtos`);
+      this.logger.log(`OCI catálogo completo (API): ${all.length} produtos`);
       return all;
     })();
 

@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# Catálogos de preços gerados automaticamente no startup
+/catalogs/*.json

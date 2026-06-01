@@ -1,6 +1,7 @@
 import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { AzureMapping, PriceEntry } from '../types/pipeline.types';
+import { readCatalog } from '../catalog/catalog-sync.service';
 
 interface AzureRetailPrice {
   retailPrice: number;
@@ -51,7 +52,20 @@ export class AzurePricingService {
       return { price: null, verified: false, reason: 'Parâmetros insuficientes no mapeamento' };
     }
 
-    // Tenta em sequência: exact match → contains → sem região
+    // 1. Tenta encontrar no catálogo local (gerado pelo CatalogSyncService)
+    const localResult = this.findInLocalCatalog(skuName, mapping.region);
+    if (localResult) {
+      this.logger.debug(`Azure local hit: ${localResult.armSkuName} — $${localResult.retailPrice}/${localResult.unitOfMeasure}`);
+      return {
+        price: localResult.retailPrice,
+        unit: localResult.unitOfMeasure,
+        estimatedMonthly: Number((localResult.retailPrice * quantityHours).toFixed(2)),
+        source: 'Azure Retail Prices API (cache)',
+        verified: true,
+      };
+    }
+
+    // 2. Fallback: consulta a API em tempo real
     const attempts = buildQueryAttempts(skuName, mapping.region, mapping.service);
 
     for (const attempt of attempts) {
@@ -64,7 +78,6 @@ export class AzurePricingService {
 
         if (!data.Items?.length) continue;
 
-        // Filtra itens com preço > 0, prefere Linux, pega o menor
         const candidates = data.Items.filter((i) => i.retailPrice > 0);
         if (!candidates.length) continue;
 
@@ -84,7 +97,6 @@ export class AzurePricingService {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Azure query falhou (${attempt.label}): ${msg}`);
-        // Continua para o próximo attempt
       }
     }
 
@@ -94,6 +106,25 @@ export class AzurePricingService {
       verified: false,
       reason: `SKU "${skuName}" não encontrado na região ${mapping.region}`,
     };
+  }
+
+  private findInLocalCatalog(skuName: string, region: string): AzureRetailPrice | null {
+    const catalog = readCatalog<{ items: AzureRetailPrice[] }>('azure');
+    if (!catalog?.items?.length) return null;
+
+    const skuBase = skuName.split(' ')[0].toLowerCase();
+    const regionLower = region.toLowerCase();
+
+    const candidates = catalog.items.filter(
+      (i) =>
+        i.retailPrice > 0 &&
+        i.armSkuName?.toLowerCase().includes(skuBase) &&
+        i.armRegionName?.toLowerCase() === regionLower &&
+        i.priceType === 'Consumption',
+    );
+
+    if (!candidates.length) return null;
+    return candidates.reduce((min, cur) => (cur.retailPrice < min.retailPrice ? cur : min));
   }
 }
 

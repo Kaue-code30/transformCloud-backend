@@ -2,6 +2,7 @@ import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { GcpMapping, PriceEntry } from '../types/pipeline.types';
+import { readCatalog } from '../catalog/catalog-sync.service';
 
 const GCP_BILLING_API = 'https://cloudbilling.googleapis.com/v1/services';
 
@@ -193,10 +194,19 @@ function extractSearchTerms(mapping: GcpMapping): string[] {
 }
 
 async function fetchAllSkus(serviceId: string, apiKey: string, logger: Logger): Promise<GcpSku[]> {
+  // 1. Tenta ler do arquivo local gerado pelo CatalogSyncService
+  const cached = readCatalog<{ skus: GcpSku[] }>(`gcp-${serviceId}`);
+  if (cached?.skus?.length) {
+    logger.debug(`GCP: usando catálogo local para ${serviceId} (${cached.skus.length} SKUs)`);
+    return cached.skus as GcpSku[];
+  }
+
+  // 2. Fallback: busca paginada direta na API
+  logger.warn(`GCP: arquivo de catálogo não encontrado para ${serviceId}, buscando na API...`);
   const allSkus: GcpSku[] = [];
   let pageToken: string | undefined;
   let page = 0;
-  const maxPages = 5; // evita loop infinito
+  const maxPages = 5;
 
   do {
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';

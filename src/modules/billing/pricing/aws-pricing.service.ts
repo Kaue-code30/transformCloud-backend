@@ -1,6 +1,7 @@
 import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { PriceEntry } from '../types/pipeline.types';
+import { readCatalog } from '../catalog/catalog-sync.service';
 
 const AWS_PRICING_API = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws';
 
@@ -141,18 +142,25 @@ export class AwsPricingService {
   private loadCatalog(service: string, region: string): Promise<AwsOffersFile> {
     const key = `${service}/${region}`;
     if (!catalogCache.has(key)) {
-      const url = `${AWS_PRICING_API}/${service}/current/${region}/index.json`;
-      this.logger.log(`AWS: carregando catálogo ${key}...`);
-      const promise = fetchJson(url, 90_000)
-        .then((data) => {
-          this.logger.log(`AWS: catálogo ${key} carregado (${Object.keys(data.products ?? {}).length} produtos)`);
-          return data;
-        })
-        .catch((err) => {
-          // Não deixa a Promise rejeitada no cache — próxima chamada tentará novamente
-          catalogCache.delete(key);
-          throw err;
-        });
+      const promise = (async () => {
+        // 1. Tenta ler do arquivo local gerado pelo CatalogSyncService
+        const cached = readCatalog<AwsOffersFile>(`aws-${service}-${region}`);
+        if (cached?.products && Object.keys(cached.products).length > 0) {
+          this.logger.debug(`AWS: usando catálogo local ${key} (${Object.keys(cached.products).length} produtos)`);
+          return cached;
+        }
+
+        // 2. Fallback: download direto da API
+        this.logger.log(`AWS: catálogo local não encontrado para ${key}, baixando da API...`);
+        const url = `${AWS_PRICING_API}/${service}/current/${region}/index.json`;
+        const data = await fetchJson(url, 90_000);
+        this.logger.log(`AWS: catálogo ${key} carregado (${Object.keys(data.products ?? {}).length} produtos)`);
+        return data;
+      })().catch((err) => {
+        catalogCache.delete(key);
+        throw err;
+      });
+
       catalogCache.set(key, promise);
     }
     return catalogCache.get(key)!;
