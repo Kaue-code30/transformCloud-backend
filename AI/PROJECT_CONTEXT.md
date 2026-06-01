@@ -1,6 +1,6 @@
 # TransformCloud Backend — Contexto Completo
 
-> Gerado em: 2026-05-21
+> Atualizado em: 2026-05-22
 > Objetivo: Referência para agentes de IA e desenvolvedores antes de qualquer mudança no backend.
 
 ---
@@ -9,8 +9,7 @@
 
 API REST em NestJS que serve o frontend Next.js do TransformCloud. Roda na porta **3001** enquanto o Next.js roda na **3000**.
 
-**Responsabilidades atuais:** autenticação JWT, cadastro e perfil de usuários.  
-**Responsabilidades futuras:** pipeline de análise de billing (V2), receitas de migração, observabilidade de infra, credenciais de provedores cloud por usuário.
+**Responsabilidades:** autenticação JWT, perfil de usuário, pipeline de análise de billing V2 (funcional).
 
 ---
 
@@ -24,75 +23,37 @@ API REST em NestJS que serve o frontend Next.js do TransformCloud. Roda na porta
 | Banco | PostgreSQL | 16 |
 | Auth | Passport + JWT | - |
 | Validação | class-validator + class-transformer | - |
-| Config | @nestjs/config | - |
+| IA | @anthropic-ai/sdk | latest |
 
-**Atenção Prisma 7:** Breaking changes em relação ao Prisma 5/6.
-- `url` foi removido do `schema.prisma` — a URL de conexão fica em `prisma.config.ts`
-- `datasourceUrl` e `datasources` foram removidos do construtor do `PrismaClient`
-- Prisma 7 exige adapter explícito no construtor — usar `@prisma/adapter-pg` com `new PrismaPg({ connectionString })`
-- O import deve ser feito de `@prisma/client` (não do caminho relativo `.prisma/client`)
+**Atenção Prisma 7:** `url` removido do `schema.prisma` — fica em `prisma.config.ts`. Requer `@prisma/adapter-pg` no construtor do `PrismaService`.
 
 ---
 
 ## Estrutura de Arquivos
 
 ```
-backend/
+src/
+├── main.ts                         # Porta 3001, CORS :3000, ValidationPipe global
+├── app.module.ts                   # Raiz: registra todos os módulos
 ├── prisma/
-│   └── schema.prisma              # Models: User, RefreshToken, CloudIntegration, BillingAnalysis
-├── prisma.config.ts               # Configuração Prisma 7 (lê DATABASE_URL do .env)
-├── src/
-│   ├── main.ts                    # Bootstrap: porta 3001, CORS :3000, ValidationPipe global
-│   ├── app.module.ts              # Raiz: registra todos os módulos
-│   ├── prisma/
-│   │   ├── prisma.service.ts      # PrismaClient como serviço NestJS (Global)
-│   │   └── prisma.module.ts       # Módulo global — não precisa importar em outros módulos
-│   └── modules/
-│       ├── auth/                  # Autenticação JWT completa
-│       │   ├── auth.module.ts
-│       │   ├── auth.service.ts
-│       │   ├── auth.controller.ts
-│       │   ├── dto/
-│       │   │   ├── register.dto.ts
-│       │   │   ├── login.dto.ts
-│       │   │   ├── refresh-token.dto.ts
-│       │   │   └── forgot-password.dto.ts
-│       │   ├── strategies/
-│       │   │   └── jwt.strategy.ts
-│       │   └── guards/
-│       │       └── jwt-auth.guard.ts
-│       ├── users/                 # Perfil de usuário (protegido por JWT)
-│       │   ├── users.module.ts
-│       │   ├── users.service.ts
-│       │   ├── users.controller.ts
-│       │   └── dto/
-│       │       ├── update-user.dto.ts
-│       │       └── change-password.dto.ts
-│       ├── billing/               # Pipeline V2 — Etapas 3+4 implementadas (ver MODULES/BILLING.md)
-│       │   ├── billing.module.ts
-│       │   ├── types/
-│       │   │   └── pipeline.types.ts        # Tipos das 6 etapas do pipeline
-│       │   └── pricing/
-│       │       ├── azure-pricing.service.ts
-│       │       ├── aws-pricing.service.ts
-│       │       ├── gcp-pricing.service.ts
-│       │       └── pricing-orchestrator.service.ts
-│       ├── migrations/            # SCAFFOLD — Receitas de migração
-│       │   └── migrations.module.ts
-│       ├── observability/         # SCAFFOLD — Métricas e alertas de infra
-│       │   └── observability.module.ts
-│       └── integrations/          # SCAFFOLD — Credenciais AWS/GCP/Azure/OCI por usuário
-│           └── integrations.module.ts
-├── AI/                            # ← Esta pasta
-│   ├── PROJECT_CONTEXT.md         # Este arquivo
-│   ├── CHANGES.md                 # Log de mudanças por sessão
-│   └── MODULES/                   # Contexto por módulo (criado quando implementado)
-│       ├── AUTH.md
-│       ├── USERS.md
-│       └── BILLING.md
-├── .env                           # DATABASE_URL, JWT_SECRET, etc (não commitado)
-├── .env.example                   # Modelo de variáveis de ambiente
-└── docker-compose.yml             # PostgreSQL 16 (na raiz do monorepo)
+│   ├── prisma.service.ts           # PrismaClient global
+│   └── prisma.module.ts
+└── modules/
+    ├── auth/                       # Auth JWT completo (register, login, refresh, logout, forgot/reset password)
+    ├── users/                      # Perfil de usuário protegido por JWT
+    └── billing/                    # Pipeline V2 — FUNCIONAL
+        ├── billing.module.ts       # Registra todos os providers + controller
+        ├── billing.controller.ts   # POST /api/billing/analyze/stream (SSE)
+        ├── pipeline.service.ts     # Orquestra as 6 etapas, emite Observable SSE
+        ├── ai/
+        │   └── claude.service.ts   # Etapas 2 e 5 (mapeamento + recomendação via Claude Opus 4.7)
+        ├── pricing/
+        │   ├── azure-pricing.service.ts       # Azure Retail Prices API
+        │   ├── gcp-pricing.service.ts         # GCP Cloud Billing API
+        │   ├── aws-pricing.service.ts         # AWS Pricing API (bulk JSON)
+        │   └── pricing-orchestrator.service.ts # Etapas 3+4: chamadas paralelas + classificação
+        └── types/
+            └── pipeline.types.ts   # Todos os tipos TypeScript do pipeline
 ```
 
 ---
@@ -101,38 +62,20 @@ backend/
 
 ```env
 DATABASE_URL="postgresql://postgres:<senha>@localhost:5432/transformcloud"
-JWT_SECRET="segredo-do-access-token"
+JWT_SECRET="..."
 JWT_EXPIRES_IN="15m"
-JWT_REFRESH_SECRET="segredo-do-refresh-token"
+JWT_REFRESH_SECRET="..."
 JWT_REFRESH_EXPIRES_IN="7d"
-JWT_RESET_SECRET="segredo-do-token-de-reset"   # opcional (fallback para JWT_SECRET)
-JWT_RESET_EXPIRES_IN="15m"
 PORT=3001
-GCP_API_KEY=""         # Chave de API pública do Google Cloud (Cloud Billing API) — sem OAuth
+
+# IA
+ANTHROPIC_API_KEY=sk-ant-...   # Claude Opus 4.7 — etapas 2 e 5 do pipeline
+
+# GCP (opcional — aumenta cobertura de preços)
+GCP_API_KEY=AIzaSy...          # Cloud Billing API — sem OAuth, sem custo
+                                # Criar em: console.cloud.google.com/apis/credentials
+                                # Habilitar: Cloud Billing API
 ```
-
----
-
-## Database Schema (Prisma)
-
-### `User`
-| Campo | Tipo | Obs |
-|-------|------|-----|
-| id | String (cuid) | PK |
-| email | String | único |
-| name | String | |
-| passwordHash | String | bcrypt, salt 10 |
-| role | Role | USER \| ADMIN |
-| createdAt / updatedAt | DateTime | |
-
-### `RefreshToken`
-Tokens de refresh armazenados no banco. Invalidados no logout ou ao usar (rotação automática).
-
-### `CloudIntegration`
-Credenciais de provedores cloud por usuário (chave criptografada). A ser implementada no módulo `integrations`.
-
-### `BillingAnalysis`
-Histórico de análises de billing por usuário. A ser implementada no módulo `billing`.
 
 ---
 
@@ -141,72 +84,138 @@ Histórico de análises de billing por usuário. A ser implementada no módulo `
 Prefixo global: `/api`
 
 ### Auth — `/api/auth`
-| Método | Rota | Body | Auth | Descrição |
-|--------|------|------|------|-----------|
-| POST | `/register` | `{ email, name, password }` | Não | Cadastro + retorna tokens |
-| POST | `/login` | `{ email, password }` | Não | Login + retorna tokens |
-| POST | `/refresh` | `{ refreshToken }` | Não | Renova tokens (rotação) |
-| POST | `/logout` | `{ refreshToken }` | Não | Invalida refresh token |
-| POST | `/forgot-password` | `{ email }` | Não | Inicia recuperação com resposta neutra e token temporário |
-| POST | `/reset-password` | `{ token, newPassword }` | Não | Redefine senha via token de reset (invalida refresh tokens) |
-
-**Resposta de tokens:**
-```json
-{ "accessToken": "...", "refreshToken": "..." }
-```
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/register` | Cadastro + retorna tokens |
+| POST | `/login` | Login + retorna tokens |
+| POST | `/refresh` | Renova tokens (rotação) |
+| POST | `/logout` | Invalida refresh token |
+| POST | `/forgot-password` | Inicia recuperação (resposta neutra) |
+| POST | `/reset-password` | Redefine senha via token temporário |
 
 ### Users — `/api/users`
-| Método | Rota | Body | Auth | Descrição |
-|--------|------|------|------|-----------|
-| GET | `/me` | — | JWT | Retorna perfil sem passwordHash |
-| PATCH | `/me` | `{ name?, password? }` | JWT | Atualiza nome ou senha |
-| PATCH | `/me/password` | `{ currentPassword, newPassword }` | JWT | Troca senha com validação da senha atual |
+| Método | Rota | Auth | Descrição |
+|--------|------|------|-----------|
+| GET | `/me` | JWT | Retorna perfil |
+| PATCH | `/me` | JWT | Atualiza nome |
+| PATCH | `/me/password` | JWT | Troca senha com validação da atual |
 
-**Header obrigatório nos endpoints protegidos:**
+### Billing — `/api/billing`
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/analyze/stream` | Pipeline completo via SSE — recebe `ParsedBilling`, retorna eventos de progresso + resultado |
+
+---
+
+## Pipeline de Billing V2
+
+### Endpoint
+
 ```
-Authorization: Bearer <accessToken>
+POST /api/billing/analyze/stream
+Content-Type: application/json
 ```
+
+### Body: `ParsedBilling`
+
+```ts
+{
+  provider: 'AWS' | 'GCP' | 'AZURE' | 'OCI';
+  period: { start: string; end: string };  // ISO: "2026-03-01"
+  currency: string;        // "USD"
+  totalCost: number;
+  dataQuality: 'good' | 'partial' | 'poor';
+  topServices: Array<{
+    name: string;          // "Amazon EC2"
+    specs: string;         // "m7g.2xlarge, us-east-1, Linux, On-Demand"
+    cost: number;
+    pct: number;
+    quantity: string;      // "730 horas" ou "18454 instance-hours"
+  }>;
+  targetRegion?: string;   // Opcional — "Brasil", "us-east-1", "Europa"
+                           // Quando informado, aumenta significativamente o match nas APIs de preço
+                           // Instrui Claude a usar regiões geográficas equivalentes nos provedores destino
+}
+```
+
+### Eventos SSE emitidos
+
+| `step` | Quando | `data` |
+|--------|--------|--------|
+| `mapping` (×2) | Início + fim do mapeamento Claude | 2ª: `{ mappings }` |
+| `pricing` | Antes de buscar preços | — |
+| `classification` | Preços + classificação prontos | `{ prices }` |
+| `recommendation` (×2) | Início + fim da recomendação Claude | 2ª: `{ recommendation }` |
+| `done` | Pipeline completo | `PipelineResult` completo |
+| `error` | Qualquer erro | `{ message }` |
+
+### Etapas do Pipeline
+
+| Etapa | Responsável | Implementação |
+|-------|-------------|---------------|
+| 1. Parsing | Frontend | Frontend parseia o arquivo e envia `ParsedBilling` |
+| 2. Mapeamento | Claude Opus 4.7 | `claude.service.ts` — mapeia serviços para GCP/Azure/OCI equivalentes |
+| 3. Preços reais | APIs públicas | `pricing-orchestrator.service.ts` — chamadas paralelas |
+| 4. Classificação | Código | `verified` / `partial` / `not_found` / `no_api` |
+| 5. Recomendação | Claude Opus 4.7 | `claude.service.ts` — recomendação com base nos dados verificados |
+| 6. Payback/ROI | Código | `pipeline.service.ts` — cálculo de 12/24/36 meses |
+
+### APIs de Preço
+
+| Provedor | API | Auth | Notas |
+|----------|-----|------|-------|
+| **Azure** | prices.azure.com/api/retail/prices | Nenhuma | Busca com 3 tentativas: exact SKU → contains SKU → sem região |
+| **GCP** | cloudbilling.googleapis.com | `GCP_API_KEY` | Paginação completa (até 5 páginas × 5000 SKUs); ~25 famílias de máquina mapeadas |
+| **AWS** | pricing.us-east-1.amazonaws.com | Nenhuma | Arquivo JSON bulk (~100MB EC2); timeout 15s |
+| **OCI** | — | — | Sem API pública; sempre retorna `no_api` |
+
+### Cobertura atual
+
+Testado com bill real AWS de $104k/mês (5 serviços):
+- **4/5 serviços verificados** → cobertura de **67%** do custo
+- EC2, RDS, S3, ElastiCache: verificados em Azure ou GCP
+- AWS WAF: sem match (WAF_v2 usa LCU, não SKU de VM)
+
+### Claude — configuração
+
+- Modelo: `claude-opus-4-7`
+- Prompt caching ativo no system prompt (ephemeral) — reduz ~90% do custo em chamadas repetidas
+- Etapa 2 (mapeamento): `max_tokens: 4096`
+- Etapa 5 (recomendação): `max_tokens: 2048`
+- `safeParseJson()` extrai JSON mesmo se Claude envolver em markdown
 
 ---
 
 ## Status dos Módulos
 
-| Módulo | Status | Próximos passos |
-|--------|--------|-----------------|
-| `billing` | ⚙️ Em andamento — Etapas 3+4 implementadas | Parser (Et.1), Claude mapping (Et.2), Claude recomendação (Et.5), payback (Et.6), controller |
-| `migrations` | 🔲 Scaffold vazio | Receitas de migração passo-a-passo, histórico por usuário |
-| `observability` | 🔲 Scaffold vazio | Métricas de infra, alertas, integrações de monitoramento |
-| `integrations` | 🔲 Scaffold vazio | CRUD de credenciais AWS/GCP/Azure/OCI criptografadas por usuário |
+| Módulo | Status |
+|--------|--------|
+| `auth` | ✅ Completo |
+| `users` | ✅ Completo |
+| `billing` | ✅ Pipeline V2 funcional (67% cobertura) |
+| `migrations` | 🔲 Scaffold vazio |
+| `observability` | 🔲 Scaffold vazio |
+| `integrations` | 🔲 Scaffold vazio |
+
+---
+
+## Próximas melhorias — Billing
+
+1. **`estimatedMonthly` correto**: parsear `quantity` do serviço (ex: `"18.454 instance-hours"`) para usar horas reais em vez de 730h fixo
+2. **Azure WAF/Blob**: mudar query para filtrar por `meterName` em vez de `armSkuName` (esses serviços cobram por LCU/GB)
+3. **Cobertura GCP**: service IDs de mais serviços (Memorystore ID ainda não verificado)
+4. **`migrationCost` configurável**: atualmente é `totalCost × 3` (heurística); expor como parâmetro
+5. **Cache de SKUs**: os catálogos GCP/Azure não mudam com frequência — cachear por 24h em Redis
 
 ---
 
 ## Como Rodar Localmente
 
 ```bash
-# 1. Instalar dependências
-cd backend && npm install
-
-# 2. Criar .env (copiar de .env.example e ajustar senha)
-cp .env.example .env
-
-# 3. Subir banco PostgreSQL (opção Docker)
-docker-compose up -d   # na raiz do monorepo
-
-# 4. Rodar migrations
-npx prisma migrate dev --name init
-
-# 5. Iniciar em modo dev
-npm run start:dev
+cd backend
+npm install
+cp .env.example .env   # ajustar DATABASE_URL e ANTHROPIC_API_KEY
+docker-compose up -d   # PostgreSQL
+npx prisma migrate dev
+npm run start:dev       # porta 3001
 ```
-
-Backend disponível em `http://localhost:3001/api`
-
----
-
-## Decisões de Arquitetura
-
-1. **PrismaModule é `@Global()`** — não precisa importar em cada módulo, só injetar `PrismaService`.
-2. **Refresh token com rotação** — cada uso do refresh gera um par novo e invalida o anterior.
-3. **`passwordHash` nunca retornado** — o método `profile()` destrói o campo antes de retornar.
-4. **Prisma 7 sem `url` no schema** — a URL fica exclusivamente em `prisma.config.ts` via `datasource.url`.
-5. **`@prisma/adapter-pg` no construtor do `PrismaService`** — Prisma 7 não lê `DATABASE_URL` automaticamente em runtime; a URL precisa ser passada via adapter (`new PrismaPg({ connectionString: process.env.DATABASE_URL })`). O import é feito de `@prisma/client` normalmente.

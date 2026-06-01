@@ -1,16 +1,57 @@
+import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GcpMapping, PriceEntry } from '../types/pipeline.types';
+import type { GcpMapping, PriceEntry } from '../types/pipeline.types';
 
 const GCP_BILLING_API = 'https://cloudbilling.googleapis.com/v1/services';
 
-// IDs dos serviços GCP na Billing API
+// IDs dos serviços na Cloud Billing API
+// Fonte: https://cloud.google.com/billing/v1/how-tos/catalog-api
 const GCP_SERVICE_IDS: Record<string, string> = {
-  'Compute Engine': '6F81-5844-456A',
-  'Cloud SQL': '9662-B51E-5089',
-  'Cloud Storage': '95FF-2EF5-5EA1',
-  'Cloud Run': '152E-C115-5142',
-  'BigQuery': '24E6-581D-38E5',
+  'Compute Engine':  '6F81-5844-456A',
+  'Cloud SQL':       '9662-B51E-5089',
+  'Cloud Storage':   '95FF-2EF5-5EA1',
+  'Cloud Run':       '152E-C115-5142',
+  'BigQuery':        '24E6-581D-38E5',
+  'Memorystore':     'E2D0-0E09-0018',  // Memorystore for Redis/Valkey
+  'AlloyDB':         '9BAE-B4E0-5BF3',  // AlloyDB for PostgreSQL
+  'Cloud Armor':     '975A-27C5-B553',  // Google Cloud Armor
+};
+
+// Termos de busca por família de máquina GCP
+// O catálogo usa nomes como "N2 Instance Core" ou "Tau T2A Instance Core"
+const MACHINE_FAMILY_TERMS: Record<string, string[]> = {
+  'n1':  ['n1 predefined instance core', 'n1 instance core'],
+  'n2':  ['n2 instance core', 'n2 custom instance core'],
+  'n2d': ['n2d amd instance core'],
+  'n4':  ['n4 instance core'],
+  'c2':  ['compute optimized core'],
+  'c2d': ['c2d amd compute optimized core'],
+  'c3':  ['c3 instance core'],
+  'c3a': ['c3a arm instance core'],
+  'c4':  ['c4 instance core'],
+  'c4a': ['c4a arm instance core'],
+  'e2':  ['e2 instance core'],
+  'm1':  ['memory-optimized instance core'],
+  'm2':  ['memory-optimized upgrade instance core'],
+  'm3':  ['m3 instance core'],
+  'a2':  ['a2 instance core'],
+  'a3':  ['a3 instance core'],
+  'g2':  ['g2 instance core'],
+  't2a': ['tau t2a instance core'],
+  't2d': ['tau t2d amd instance core'],
+  // Cloud SQL
+  'db-custom': ['db custom core', 'sql zonal - db custom core'],
+  'db-n1':     ['db n1 standard', 'sql zonal - db n1'],
+  'db-n2':     ['db n2 standard', 'sql zonal - db n2'],
+  'db-highmem':['db highmem', 'sql zonal - db highmem'],
+  // Memorystore
+  'm1-ultra':  ['memorystore for redis ultra'],
+  'm1-standard':['memorystore for redis standard'],
+  // Catch-all para armazenamento
+  'standard':  ['standard storage'],
+  'nearline':  ['nearline storage'],
+  'coldline':  ['coldline storage'],
 };
 
 interface GcpSku {
@@ -31,12 +72,6 @@ interface GcpSkuListResponse {
   nextPageToken?: string;
 }
 
-// Converte região AWS para região GCP equivalente (retornado pelo mapeamento do Claude)
-// O Claude já retorna a região GCP correta; esta função normaliza variações de formato
-function normalizeGcpRegion(region: string): string {
-  return region.toLowerCase().replace('_', '-');
-}
-
 @Injectable()
 export class GcpPricingService {
   private readonly logger = new Logger(GcpPricingService.name);
@@ -45,86 +80,162 @@ export class GcpPricingService {
 
   async getPrice(mapping: GcpMapping, quantityHours: number): Promise<PriceEntry> {
     const apiKey = this.config.get<string>('GCP_API_KEY');
-    if (!apiKey) {
+    if (!apiKey || apiKey.includes('COLOQUE_SUA')) {
       return { price: null, verified: false, reason: 'GCP_API_KEY não configurada' };
     }
 
-    const serviceId = GCP_SERVICE_IDS[mapping.service];
+    const serviceId = resolveServiceId(mapping.service);
     if (!serviceId) {
-      return {
-        price: null,
-        verified: false,
-        reason: `Serviço GCP "${mapping.service}" não mapeado para serviceId`,
-      };
+      return { price: null, verified: false, reason: `Serviço GCP "${mapping.service}" não reconhecido` };
     }
 
-    const region = mapping.region ? normalizeGcpRegion(mapping.region) : null;
+    const region = mapping.region ? mapping.region.toLowerCase().replace(/_/g, '-') : null;
     if (!region) {
-      return { price: null, verified: false, reason: 'Região GCP não informada no mapeamento' };
+      return { price: null, verified: false, reason: 'Região GCP não informada' };
+    }
+
+    const searchTerms = extractSearchTerms(mapping);
+    if (!searchTerms.length) {
+      return { price: null, verified: false, reason: 'Não foi possível extrair termo de busca do mapeamento' };
     }
 
     try {
-      const skuIdentifier = mapping.machineType ?? mapping.tier;
-      const url = `${GCP_BILLING_API}/${serviceId}/skus?currencyCode=USD&key=${apiKey}`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      // Busca com paginação — segue nextPageToken até encontrar ou esgotar
+      const skus = await fetchAllSkus(serviceId, apiKey, this.logger);
 
-      if (!response.ok) {
-        return { price: null, verified: false, reason: `HTTP ${response.status} da GCP Billing API` };
+      for (const term of searchTerms) {
+        // Tenta com região primeiro, depois sem
+        let sku = findSku(skus, term, region);
+        if (!sku) sku = findSku(skus, term, null);
+
+        if (sku) {
+          const unitPrice = extractUnitPrice(sku);
+          if (unitPrice !== null) {
+            this.logger.debug(`GCP match: "${sku.description}" (termo: "${term}") — $${unitPrice}/h`);
+            return {
+              price: unitPrice,
+              unit: 'hora',
+              estimatedMonthly: Number((unitPrice * quantityHours).toFixed(2)),
+              source: 'GCP Cloud Billing API',
+              verified: true,
+            };
+          }
+        }
       }
 
-      const data: GcpSkuListResponse = await response.json() as GcpSkuListResponse;
-      const sku = this.findSku(data.skus, skuIdentifier, region);
-
-      if (!sku) {
-        return {
-          price: null,
-          verified: false,
-          reason: `SKU para ${skuIdentifier ?? mapping.service} não encontrado na região ${region}`,
-        };
-      }
-
-      const hourlyPrice = this.extractHourlyPrice(sku);
-      if (hourlyPrice === null) {
-        return { price: null, verified: false, reason: 'Estrutura de preço inesperada na resposta GCP' };
-      }
-
+      this.logger.warn(`GCP: nenhum SKU encontrado para ${mapping.service} (termos: ${searchTerms.join(', ')}) em ${region}`);
       return {
-        price: hourlyPrice,
-        unit: 'hora',
-        estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
-        source: 'GCP Cloud Billing API',
-        verified: true,
+        price: null,
+        verified: false,
+        reason: `Nenhum SKU encontrado para ${mapping.service} em ${region}`,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Erro ao consultar GCP Billing API: ${msg}`);
+      this.logger.error(`Erro GCP Billing API (${mapping.service}): ${msg}`);
       return { price: null, verified: false, reason: `Erro na requisição: ${msg}` };
     }
   }
+}
 
-  private findSku(skus: GcpSku[], identifier: string | undefined, region: string): GcpSku | null {
-    if (!identifier) return null;
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-    // Busca por SKU que mencione o identificador na descrição e cubra a região
-    const normalized = identifier.toLowerCase();
-    return (
-      skus.find(
-        (s) =>
-          s.description.toLowerCase().includes(normalized) &&
-          s.serviceRegions.some((r) => r.toLowerCase() === region),
-      ) ?? null
-    );
+function resolveServiceId(rawName: string): string | null {
+  const lower = rawName.toLowerCase().trim();
+  for (const [name, id] of Object.entries(GCP_SERVICE_IDS)) {
+    if (lower === name.toLowerCase()) return id;
+    if (lower.startsWith(name.toLowerCase())) return id;
+    if (lower.includes(name.toLowerCase())) return id;
+  }
+  return null;
+}
+
+// Retorna múltiplos termos candidatos, do mais específico ao mais genérico
+function extractSearchTerms(mapping: GcpMapping): string[] {
+  const raw = (mapping.machineType ?? mapping.tier ?? '').toLowerCase().trim();
+  if (!raw) return [];
+
+  // Busca direta por família conhecida
+  for (const [family, terms] of Object.entries(MACHINE_FAMILY_TERMS)) {
+    if (raw.startsWith(family) || raw === family) {
+      return terms;
+    }
   }
 
-  private extractHourlyPrice(sku: GcpSku): number | null {
-    const pricing = sku.pricingInfo?.[0]?.pricingExpression;
-    if (!pricing) return null;
-
-    const rate = pricing.tieredRates?.[0];
-    if (!rate) return null;
-
-    // GCP retorna preço em unidades + nanos (1 unidade = 1e9 nanos)
-    const price = parseInt(rate.unitPrice.units || '0') + rate.unitPrice.nanos / 1e9;
-    return price > 0 ? Number(price.toFixed(6)) : null;
+  // Fallback: extrai a família do prefixo e tenta variações
+  const family = raw.split('-')[0];
+  if (family) {
+    return [
+      `${family} instance core`,
+      `${family} custom instance core`,
+      `${family} instance`,
+      family,
+    ];
   }
+
+  return [];
+}
+
+async function fetchAllSkus(serviceId: string, apiKey: string, logger: Logger): Promise<GcpSku[]> {
+  const allSkus: GcpSku[] = [];
+  let pageToken: string | undefined;
+  let page = 0;
+  const maxPages = 5; // evita loop infinito
+
+  do {
+    const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    const url = `${GCP_BILLING_API}/${serviceId}/skus?currencyCode=USD&pageSize=5000${tokenParam}&key=${apiKey}`;
+
+    const body = await httpsGet(url, 25000);
+    const data: GcpSkuListResponse = JSON.parse(body) as GcpSkuListResponse;
+
+    if (!data.skus?.length) break;
+    allSkus.push(...data.skus);
+    pageToken = data.nextPageToken;
+    page++;
+
+    logger.debug(`GCP SKUs carregados: ${allSkus.length} (página ${page})`);
+  } while (pageToken && page < maxPages);
+
+  return allSkus;
+}
+
+function findSku(skus: GcpSku[], searchTerm: string, region: string | null): GcpSku | null {
+  const term = searchTerm.toLowerCase();
+  return (
+    skus.find((s) => {
+      const descMatch = s.description.toLowerCase().includes(term);
+      if (!descMatch) return false;
+      if (!region) return true;
+      return s.serviceRegions.some((r) => r.toLowerCase() === region);
+    }) ?? null
+  );
+}
+
+function extractUnitPrice(sku: GcpSku): number | null {
+  const pricing = sku.pricingInfo?.[0]?.pricingExpression;
+  if (!pricing) return null;
+
+  // Pega a primeira taxa com preço > 0
+  const rate = pricing.tieredRates?.find((r) => {
+    const units = parseInt(r.unitPrice.units || '0');
+    return units > 0 || r.unitPrice.nanos > 0;
+  }) ?? pricing.tieredRates?.[0];
+
+  if (!rate) return null;
+
+  const price = parseInt(rate.unitPrice.units || '0') + rate.unitPrice.nanos / 1e9;
+  return price > 0 ? Number(price.toFixed(6)) : null;
+}
+
+function httpsGet(url: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      res.on('error', reject);
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error(`Timeout (${timeoutMs}ms)`)); });
+    req.on('error', reject);
+  });
 }

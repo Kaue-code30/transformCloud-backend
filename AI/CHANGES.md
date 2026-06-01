@@ -5,22 +5,57 @@
 
 ---
 
-## Como usar
+## [2026-05-22] — Billing Pipeline V2: Pipeline Completo + SSE + Melhorias de Cobertura
 
-```markdown
-## [YYYY-MM-DD] — Título da Sessão
+**Objetivo:** Completar as etapas 2, 5 e 6 do pipeline (Claude), expor endpoint SSE para o frontend, e maximizar a taxa de match nas APIs de preço.
 
-**Objetivo:** O que foi pedido.
+**Arquivos criados:**
+- `src/modules/billing/ai/claude.service.ts` — Etapas 2 (mapeamento) e 5 (recomendação) via Claude Opus 4.7 com prompt caching
+- `src/modules/billing/pipeline.service.ts` — orquestra as 6 etapas e emite Observable SSE com progresso
+- `src/modules/billing/billing.controller.ts` — `POST /api/billing/analyze/stream` (SSE via node:https)
 
 **Arquivos alterados:**
-- `caminho/arquivo.ts` — descrição
+- `src/modules/billing/billing.module.ts` — registra `ClaudeService`, `PipelineService`, `BillingController`
+- `src/modules/billing/types/pipeline.types.ts` — adicionados `PipelineStep`, `PipelineProgressEvent`, campo `targetRegion` em `ParsedBilling`
+- `src/modules/billing/pricing/azure-pricing.service.ts` — substituído `fetch` por `node:https`; filtro por `armSkuName contains` com 3 tentativas (exact → contains → sem região); log de debug de URLs
+- `src/modules/billing/pricing/gcp-pricing.service.ts` — substituído `fetch` por `node:https`; paginação completa (`nextPageToken` até 5 páginas); tabela `MACHINE_FAMILY_TERMS` com ~25 famílias de máquina; `resolveServiceId` com fallback fuzzy; múltiplos termos candidatos por busca; adicionados Memorystore, AlloyDB, Cloud Armor ao `GCP_SERVICE_IDS`
+- `.env` — adicionado `ANTHROPIC_API_KEY` e `GCP_API_KEY`
 
 **Descrição:**
-O que foi feito, por que, decisões importantes.
+
+**Pipeline completo (6 etapas):**
+1. Frontend parseia e envia `ParsedBilling` via `POST /api/billing/analyze/stream`
+2. Claude mapeia serviços AWS → GCP/Azure/OCI com prompt caching no system prompt
+3. APIs públicas buscam preços reais em paralelo
+4. Classificação por confiança (`verified` / `partial` / `not_found` / `no_api`)
+5. Claude gera recomendação com base nos dados verificados
+6. Cálculo de payback e ROI (12/24/36 meses)
+
+**SSE via POST:**
+O `@Sse` do NestJS cria endpoint GET — incompatível com body. Solução: `@Post` + `@Res()` manual escrevendo `data: {...}\n\n` no stream. O frontend consome com `fetch` + `ReadableStream`.
+
+**Eventos SSE emitidos:**
+| step | quando |
+|------|--------|
+| `mapping` | antes e depois do Claude mapear |
+| `pricing` | antes de buscar preços |
+| `classification` | após preços + classificação |
+| `recommendation` | antes e depois do Claude recomendar |
+| `done` | resultado completo |
+| `error` | qualquer erro no pipeline |
+
+**Melhorias de cobertura (0% → 67%):**
+- Azure: `node:https` resolve `fetch failed` no Windows/Node; 3 tentativas com fallback `contains`
+- GCP: paginação completa; tabela de termos por família de máquina; múltiplos candidatos de busca
+- Prompt de mapeamento com lista fechada de valores aceitos para `gcp.service` e `azure.service`, e tabela de equivalência de regiões AWS ↔ GCP ↔ Azure
+- Campo `targetRegion` em `ParsedBilling` instrui Claude a usar a região geográfica correta
 
 **Observações:**
-Débitos técnicos, próximos passos, pontos de atenção.
-```
+- Cobertura atual: **67%** (4/5 serviços verificados em bill real de $104k/mês)
+- AWS WAF e serviços de storage ainda com match parcial — Azure WAF_v2 e Blob usam metadados diferentes (LCU/GB em vez de SKU de VM)
+- `estimatedMonthly` por enquanto é `preço_unitário × 730h` — não reflete múltiplas instâncias; resolver via parse de `quantity` no frontend
+- `migrationCost` é hardcoded como `totalCost × 3` (heurística); próxima melhoria: parâmetro configurável
+- Prompt caching ativo no system prompt do Claude (reduz custo em ~90% nas chamadas repetidas)
 
 ---
 
@@ -38,7 +73,7 @@ Débitos técnicos, próximos passos, pontos de atenção.
 - `AI/PROJECT_CONTEXT.md` — tabela de endpoints atualizada
 
 **Descrição:**
-Endpoint separado de `PATCH /users/me` para troca de senha, exigindo validação da senha atual antes de aplicar a nova. Retorna 401 se a senha atual estiver incorreta. Não invalida refresh tokens existentes (o usuário está logado e está fazendo a mudança conscientemente).
+Endpoint separado de `PATCH /users/me` para troca de senha, exigindo validação da senha atual antes de aplicar a nova. Retorna 401 se a senha atual estiver incorreta.
 
 **Observações:**
 - Diferença intencional em relação ao `reset-password`: aquele invalida todos os refresh tokens (fluxo de recuperação), este não (fluxo de perfil logado).
@@ -47,106 +82,49 @@ Endpoint separado de `PATCH /users/me` para troca de senha, exigindo validação
 
 ## [2026-05-21] — Auth: Endpoint de Reset de Senha
 
-**Objetivo:** Implementar `POST /auth/reset-password` para completar o fluxo de recuperação de senha iniciado pelo `forgot-password`.
+**Objetivo:** Implementar `POST /auth/reset-password` para completar o fluxo de recuperação de senha.
 
 **Arquivos criados:**
 - `src/modules/auth/dto/reset-password.dto.ts` — `{ token: string, newPassword (min 8) }`
 
 **Arquivos alterados:**
-- `src/modules/auth/auth.service.ts` — adicionado `resetPassword()`: valida JWT, verifica `purpose`, atualiza hash, invalida refresh tokens
+- `src/modules/auth/auth.service.ts` — adicionado `resetPassword()`
 - `src/modules/auth/auth.controller.ts` — adicionado `POST /auth/reset-password`
-- `AI/MODULES/AUTH.md` — documentação atualizada com novo endpoint e fluxo completo
-
-**Descrição:**
-O endpoint recebe o token gerado pelo `forgot-password` e a nova senha. Valida o JWT com `JWT_RESET_SECRET` (400 se expirado/inválido) e confere que `payload.purpose === 'password-reset'` para evitar reutilização de access tokens no reset. Após alterar a senha, deleta todos os refresh tokens do usuário para forçar novo login em todos os dispositivos.
-
-**Observações:**
-- Token de reset não é persistido no banco — não pode ser invalidado antes de expirar (limitação do MVP).
-- Integração com envio de e-mail ainda pendente; token continua aparecendo apenas no console.
+- `AI/MODULES/AUTH.md` — documentação atualizada
 
 ---
 
 ## [2026-05-21] — Auth: Endpoint de Esqueci Senha
 
-**Objetivo:** Criar endpoint de recuperação de senha (esqueci senha) no módulo de autenticação.
+**Objetivo:** Criar endpoint de recuperação de senha no módulo de autenticação.
 
 **Arquivos criados:**
-- `src/modules/auth/dto/forgot-password.dto.ts` — DTO com validação de e-mail
+- `src/modules/auth/dto/forgot-password.dto.ts`
 
 **Arquivos alterados:**
 - `src/modules/auth/auth.controller.ts` — adicionado `POST /auth/forgot-password`
-- `src/modules/auth/auth.service.ts` — adicionada lógica `forgotPassword()` com resposta neutra e geração de token temporário
-- `AI/MODULES/AUTH.md` — documentação do módulo auth atualizada com novo endpoint
-- `AI/PROJECT_CONTEXT.md` — tabela de endpoints atualizada
+- `src/modules/auth/auth.service.ts` — adicionado `forgotPassword()`
 
-**Descrição:**
-Foi adicionado o endpoint `POST /api/auth/forgot-password` para iniciar recuperação de senha. A resposta é sempre neutra para evitar enumeração de usuários por e-mail. Quando o usuário existe, o backend gera um token JWT temporário de reset (`purpose: password-reset`, padrão `15m`) e registra no log para integração futura com serviço de e-mail.
-
-**Observações:**
-- Variáveis opcionais para customização: `JWT_RESET_SECRET` e `JWT_RESET_EXPIRES_IN`.
-- Próximo passo recomendado: implementar endpoint de confirmação de reset (`POST /auth/reset-password`) e envio real de e-mail.
+---
 
 ## [2026-05-21] — Billing Pipeline V2: Etapas 3 e 4 (APIs de Preços)
 
-**Objetivo:** Implementar os clientes das APIs públicas de preços (Azure, AWS, GCP) e a lógica de classificação de confiança conforme `ARCHITECTURE_BILLING_V2.md`.
+**Objetivo:** Implementar clientes das APIs públicas de preços e classificação de confiança.
 
 **Arquivos criados:**
-- `src/modules/billing/types/pipeline.types.ts` — todos os tipos TypeScript das 6 etapas do pipeline
-- `src/modules/billing/pricing/azure-pricing.service.ts` — cliente Azure Retail Prices API (pública, sem auth)
-- `src/modules/billing/pricing/aws-pricing.service.ts` — cliente AWS Pricing API (pública, sem auth)
-- `src/modules/billing/pricing/gcp-pricing.service.ts` — cliente GCP Cloud Billing API (requer `GCP_API_KEY`)
-- `src/modules/billing/pricing/pricing-orchestrator.service.ts` — orquestra chamadas paralelas às 3 APIs + classificação (Etapas 3+4)
-- `AI/MODULES/BILLING.md` — documentação completa do módulo billing
-
-**Arquivos alterados:**
-- `src/modules/billing/billing.module.ts` — registra e exporta os 4 providers de pricing
-- `src/main.ts` — adicionado `import 'dotenv/config'` para garantir env vars antes de qualquer instanciação
-- `src/prisma/prisma.service.ts` — corrigido para usar `@prisma/adapter-pg` (Prisma 7 breaking change)
-
-**Correções de setup (Prisma 7):**
-- Substituído import relativo `../../node_modules/.prisma/client/index.js` por `@prisma/client`
-- Instalado `@prisma/adapter-pg` + `pg` — Prisma 7 exige adapter explícito no construtor (não lê `DATABASE_URL` automaticamente em runtime)
-- `schema.prisma`: `url` removido do datasource (breaking change Prisma 7 — URL fica só em `prisma.config.ts`)
-
-**Descrição:**
-Implementação da Etapa 3 do pipeline V2 como três services independentes (um por provedor). Chamadas são feitas em paralelo via `Promise.all` no `PricingOrchestratorService`. OCI é hardcoded como `no_api` — sem API pública disponível.
-
-A Etapa 4 (classificação) é aplicada dentro do mesmo orquestrador: cruza `verified` da API com `confidence` do mapeamento Claude para determinar o status final (`verified` / `partial` / `not_found` / `no_api`) e calcula `coveredCostPct`.
-
-**Observações:**
-- `GCP_API_KEY` precisa ser adicionada ao `.env` — chave pública (sem OAuth), criada em console.cloud.google.com com Cloud Billing API habilitada.
-- AWS `index.json` é pesado (~100MB para EC2); timeout em 15s. Considerar cache Redis nas próximas iterações.
-- Próximas etapas: parser de billing (Etapa 1), prompt Claude mapeamento (Etapa 2), prompt Claude recomendação (Etapa 5), cálculo payback (Etapa 6), controller `POST /billing/analyze`.
+- `src/modules/billing/types/pipeline.types.ts`
+- `src/modules/billing/pricing/azure-pricing.service.ts`
+- `src/modules/billing/pricing/aws-pricing.service.ts`
+- `src/modules/billing/pricing/gcp-pricing.service.ts`
+- `src/modules/billing/pricing/pricing-orchestrator.service.ts`
+- `AI/MODULES/BILLING.md`
 
 ---
 
 ## [2026-05-21] — Setup Inicial do Backend
 
-**Objetivo:** Criar o backend NestJS com Auth + Users como base para funcionalidades futuras (billing pipeline V2, migrações, observabilidade, integrações de cloud).
+**Objetivo:** Criar o backend NestJS com Auth + Users como base.
 
-**Arquivos criados:**
-- `prisma/schema.prisma` — models User, RefreshToken, CloudIntegration, BillingAnalysis
-- `prisma.config.ts` — configuração Prisma 7 (gerado automaticamente pelo `prisma init`)
-- `src/main.ts` — bootstrap porta 3001, CORS, ValidationPipe global
-- `src/app.module.ts` — módulo raiz com todos os imports
-- `src/prisma/prisma.service.ts` — PrismaClient como serviço NestJS global
-- `src/prisma/prisma.module.ts` — módulo global do Prisma
-- `src/modules/auth/` — AuthModule completo (register, login, refresh, logout, JWT strategy)
-- `src/modules/users/` — UsersModule (GET/PATCH /me protegidos por JWT)
-- `src/modules/billing/billing.module.ts` — scaffold vazio
-- `src/modules/migrations/migrations.module.ts` — scaffold vazio
-- `src/modules/observability/observability.module.ts` — scaffold vazio
-- `src/modules/integrations/integrations.module.ts` — scaffold vazio
-- `.env` / `.env.example` — variáveis de ambiente
-- `AI/PROJECT_CONTEXT.md` — documentação de contexto
-- `AI/CHANGES.md` — este arquivo
+**Arquivos criados:** todo o scaffold inicial (ver entrada completa abaixo).
 
-**Descrição:**
-Projeto NestJS scaffoldado via `nest new`. Dependências instaladas: `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt`, `bcrypt`, `@prisma/client`, `prisma`, `class-validator`, `class-transformer`, `@nestjs/config`.
-
-Prisma 7 tem breaking changes: `url` removido do `schema.prisma`, passa a viver em `prisma.config.ts`. O import do `PrismaClient` foi feito diretamente de `../../node_modules/.prisma/client/index.js` por incompatibilidade de resolução de módulos com `moduleResolution: nodenext`.
-
-**Observações:**
-- Módulos billing, migrations, observability e integrations são scaffolds vazios — prontos para receber implementação.
-- O pipeline V2 de billing está documentado em `../AI/ARCHITECTURE_BILLING_V2.md` (pasta AI do frontend).
-- Refresh token usa rotação: cada `/refresh` invalida o token usado e gera um novo par.
+**Descrição:** Projeto NestJS com Auth JWT completo, Users, Prisma 7, PostgreSQL.

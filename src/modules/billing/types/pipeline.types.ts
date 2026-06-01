@@ -18,6 +18,12 @@ export interface ParsedBilling {
   totalCost: number;
   dataQuality: DataQuality;
   topServices: TopService[];
+  /**
+   * Restrição geográfica do cliente (opcional).
+   * Ex: "Brasil", "América do Norte", "Europa", "us-east-1", "southamerica-east1"
+   * Quando informado, o mapeamento de serviços priorizará regiões equivalentes nos provedores destino.
+   */
+  targetRegion?: string;
 }
 
 // ─── Etapa 2: Mapeamento (Claude) ─────────────────────────────────────────────
@@ -49,11 +55,21 @@ export interface OciMapping {
   confidence: Confidence;
 }
 
+export interface AwsMapping {
+  service: string;
+  instanceType?: string;
+  region?: string;
+  operatingSystem?: string;
+  databaseEngine?: string;
+  confidence: Confidence;
+}
+
 export interface ServiceMapping {
   original: string;
   gcp?: GcpMapping;
   azure?: AzureMapping;
   oci?: OciMapping;
+  aws?: AwsMapping;
 }
 
 export interface MappingResult {
@@ -79,6 +95,7 @@ export interface ServicePrice {
   gcp: PriceEntry;
   azure: PriceEntry;
   oci: PriceEntry;
+  aws: PriceEntry;
 }
 
 export interface PricingResult {
@@ -91,6 +108,7 @@ export interface ClassifiedPrice extends ServicePrice {
   gcpStatus: VerificationStatus;
   azureStatus: VerificationStatus;
   ociStatus: VerificationStatus;
+  awsStatus: VerificationStatus;
 }
 
 export interface ClassificationResult {
@@ -145,4 +163,23 @@ export interface PipelineResult {
   prices: ClassificationResult;
   recommendation: RecommendationResult;
   payback: PaybackResult;
+}
+
+// ─── SSE — eventos de progresso ──────────────────────────────────────────────
+
+export type PipelineStep =
+  | 'mapping'
+  | 'pricing'
+  | 'classification'
+  | 'recommendation'
+  | 'payback'
+  | 'done'
+  | 'error';
+
+export interface PipelineProgressEvent {
+  step: PipelineStep;
+  /** Mensagem legível para exibir na UI */
+  message: string;
+  /** Dado parcial disponível neste ponto — presente apenas em alguns steps */
+  data?: Partial<PipelineResult>;
 }

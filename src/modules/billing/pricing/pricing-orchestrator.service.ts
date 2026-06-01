@@ -12,6 +12,7 @@ import {
   PriceEntry,
   VerificationStatus,
   Confidence,
+  AwsMapping,
 } from '../types/pipeline.types';
 
 @Injectable()
@@ -46,13 +47,16 @@ export class PricingOrchestratorService {
   ) {
     const hours = this.estimateHours(svc);
 
-    const [gcpEntry, azureEntry] = await Promise.all([
+    const [gcpEntry, azureEntry, awsEntry] = await Promise.all([
       mapping?.gcp
         ? this.gcp.getPrice(mapping.gcp, hours)
         : this.notAvailable('Sem mapeamento GCP'),
       mapping?.azure
         ? this.azure.getPrice(mapping.azure, hours)
         : this.notAvailable('Sem mapeamento Azure'),
+      mapping?.aws
+        ? this.aws.getPrice(this.toAwsParams(mapping.aws), hours)
+        : this.notAvailable('Sem mapeamento AWS'),
     ]);
 
     // OCI não tem API pública — sempre retorna sem dados
@@ -68,8 +72,10 @@ export class PricingOrchestratorService {
       gcp: gcpEntry,
       azure: azureEntry,
       oci: ociEntry,
+      aws: awsEntry,
       gcpConfidence: mapping?.gcp?.confidence ?? null,
       azureConfidence: mapping?.azure?.confidence ?? null,
+      awsConfidence: mapping?.aws?.confidence ?? null,
     };
   }
 
@@ -85,30 +91,33 @@ export class PricingOrchestratorService {
       gcp: item.gcp,
       azure: item.azure,
       oci: item.oci,
+      aws: item.aws,
       gcpStatus: this.resolveStatus(item.gcp, item.gcpConfidence),
       azureStatus: this.resolveStatus(item.azure, item.azureConfidence),
-      ociStatus: 'no_api',
+      ociStatus: 'no_api' as VerificationStatus,
+      awsStatus: this.resolveStatus(item.aws, item.awsConfidence),
     }));
 
+    const isVerified = (c: ClassifiedPrice) =>
+      c.gcpStatus === 'verified' || c.azureStatus === 'verified' || c.awsStatus === 'verified';
+
     const verifiedCost = classified
-      .filter((c) => c.gcpStatus === 'verified' || c.azureStatus === 'verified')
+      .filter(isVerified)
       .reduce((sum, c) => sum + c.currentCost, 0);
 
-    const verifiedServices = classified.filter(
-      (c) => c.gcpStatus === 'verified' || c.azureStatus === 'verified',
-    ).length;
+    const verifiedServices = classified.filter(isVerified).length;
 
     const partialServices = classified.filter(
       (c) =>
-        (c.gcpStatus === 'partial' || c.azureStatus === 'partial') &&
-        c.gcpStatus !== 'verified' &&
-        c.azureStatus !== 'verified',
+        (c.gcpStatus === 'partial' || c.azureStatus === 'partial' || c.awsStatus === 'partial') &&
+        !isVerified(c),
     ).length;
 
     const notFoundServices = classified.filter(
       (c) =>
         c.gcpStatus === 'not_found' &&
-        c.azureStatus === 'not_found',
+        c.azureStatus === 'not_found' &&
+        c.awsStatus === 'not_found',
     ).length;
 
     return {
@@ -132,15 +141,24 @@ export class PricingOrchestratorService {
     return 'verified';
   }
 
+  private toAwsParams(m: AwsMapping): AwsPricingParams {
+    return {
+      service: m.service,
+      region: m.region ?? 'us-east-1',
+      instanceType: m.instanceType,
+      operatingSystem: m.operatingSystem,
+      databaseEngine: m.databaseEngine,
+    };
+  }
+
   private notAvailable(reason: string): PriceEntry {
     return { price: null, verified: false, reason };
   }
 
-  // Extrai quantidade de horas a partir da string de quantidade do serviço
   private estimateHours(svc: TopService): number {
-    const match = svc.quantity.match(/(\d+)\s*hora/i);
+    const q = String(svc.quantity ?? '');
+    const match = q.match(/(\d+)\s*hora/i);
     if (match) return parseInt(match[1]);
-    // Fallback: mês padrão de 730 horas
     return 730;
   }
 }

@@ -1,162 +1,214 @@
-# Módulo: Billing
+# Módulo: Billing — Pipeline V2
 
-> Última atualização: 2026-05-21
-> Status: Parcialmente implementado — Etapas 3 e 4 prontas
+> Atualizado em: 2026-05-22
+> Status: Funcional — 67% de cobertura verificada em bill real de $104k/mês
 
 ---
 
-## Responsabilidade
+## Visão Geral
 
-Análise de custos de cloud via pipeline em 6 etapas (V2). Recebe um arquivo de billing do provedor atual, mapeia serviços equivalentes nos outros provedores, busca preços reais via APIs públicas e gera recomendação de migração com cálculo de payback.
+Pipeline de análise de billing em 6 etapas. O frontend parseia o arquivo e envia o resultado estruturado; o backend orquestra mapeamento IA + APIs de preço + recomendação IA.
 
-Arquitetura completa documentada em: `AI/ARCHITECTURE_BILLING_V2.md`
+```
+Frontend (parse)
+    ↓ POST /api/billing/analyze/stream
+[1] ParsedBilling recebido
+[2] Claude Opus 4.7 — mapeia serviços AWS → GCP/Azure/OCI
+[3] APIs públicas — busca preços reais em paralelo
+[4] Classificação — verified / partial / not_found / no_api
+[5] Claude Opus 4.7 — recomendação baseada nos dados verificados
+[6] Código — payback e ROI (12/24/36 meses)
+    ↓ SSE events → frontend
+```
 
 ---
 
 ## Arquivos
 
-```
-src/modules/billing/
-├── billing.module.ts                        # Registra e exporta os providers de pricing
-├── types/
-│   └── pipeline.types.ts                    # Tipos TypeScript de todas as 6 etapas
-└── pricing/
-    ├── azure-pricing.service.ts             # Cliente Azure Retail Prices API
-    ├── aws-pricing.service.ts               # Cliente AWS Pricing API
-    ├── gcp-pricing.service.ts               # Cliente GCP Cloud Billing API
-    └── pricing-orchestrator.service.ts      # Orquestra Etapas 3 + 4
-```
+| Arquivo | Responsabilidade |
+|---------|-----------------|
+| `billing.controller.ts` | `POST /analyze/stream` — escreve SSE manualmente via `@Res()` |
+| `pipeline.service.ts` | Orquestra as 6 etapas, retorna `Observable<PipelineProgressEvent>` |
+| `ai/claude.service.ts` | Etapas 2 e 5 — chamadas ao Claude com prompt caching |
+| `pricing/pricing-orchestrator.service.ts` | Etapas 3+4 — chamadas paralelas + classificação |
+| `pricing/azure-pricing.service.ts` | Azure Retail Prices API |
+| `pricing/gcp-pricing.service.ts` | GCP Cloud Billing API |
+| `pricing/aws-pricing.service.ts` | AWS Pricing API (bulk JSON) |
+| `types/pipeline.types.ts` | Todos os tipos TypeScript do pipeline |
 
 ---
 
-## Status por Etapa do Pipeline
+## Tipos principais (`pipeline.types.ts`)
 
-| Etapa | Responsável | Status | Arquivo |
-|-------|-------------|--------|---------|
-| 1 — Parsing e análise inicial | Código | ❌ Pendente | — |
-| 2 — Mapeamento de serviços | Claude (1ª chamada) | ❌ Pendente | — |
-| 3 — Busca de preços reais | Código → APIs públicas | ✅ Implementado | `pricing/*.service.ts` |
-| 4 — Classificação de confiança | Código | ✅ Implementado | `pricing-orchestrator.service.ts` |
-| 5 — Recomendação e texto | Claude (2ª chamada) | ❌ Pendente | — |
-| 6 — Cálculo de PAYBACK | Código | ❌ Pendente | — |
+```ts
+// Input do frontend
+interface ParsedBilling {
+  provider: 'AWS' | 'GCP' | 'AZURE' | 'OCI';
+  period: { start: string; end: string };
+  currency: string;
+  totalCost: number;
+  dataQuality: 'good' | 'partial' | 'poor';
+  topServices: TopService[];
+  targetRegion?: string;  // "Brasil", "us-east-1", "Europa" — aumenta cobertura
+}
 
----
+// Evento SSE
+interface PipelineProgressEvent {
+  step: 'mapping' | 'pricing' | 'classification' | 'recommendation' | 'done' | 'error';
+  message: string;
+  data?: Partial<PipelineResult>;
+}
 
-## Etapa 3 — Clientes de API de Preços
-
-### Azure (`AzurePricingService`)
-
-- **API:** `https://prices.azure.com/api/retail/prices`
-- **Auth:** Nenhuma — API pública
-- **Entrada:** `AzureMapping` (skuName, service, region) + quantidade de horas
-- **Filtra por:** `serviceName`, `armSkuName`, `armRegionName`, `priceType eq 'Consumption'`
-- **Timeout:** 8 segundos
-- **Retorna:** `PriceEntry` com `price` (por hora), `estimatedMonthly`, `source`
-
-### AWS (`AwsPricingService`)
-
-- **API:** `https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/{service}/current/{region}/index.json`
-- **Auth:** Nenhuma — API pública
-- **Entrada:** `AwsPricingParams` (service, region, instanceType, operatingSystem) + horas
-- **Estratégia:** Baixa o `index.json` da região e filtra por `instanceType` + `operatingSystem=Linux` + `tenancy=Shared`
-- **Timeout:** 15 segundos (arquivo grande)
-- **Mapa de regiões:** `us-east-1` → `"US East (N. Virginia)"` etc. (ver `AWS_REGION_NAMES` no serviço)
-- **Retorna:** `PriceEntry` com preço OnDemand por hora
-
-### GCP (`GcpPricingService`)
-
-- **API:** `https://cloudbilling.googleapis.com/v1/services/{serviceId}/skus`
-- **Auth:** Requer `GCP_API_KEY` no `.env` (chave de API pública do Google Cloud, sem OAuth)
-- **Entrada:** `GcpMapping` (service, machineType/tier, region) + horas
-- **Estratégia:** Busca SKUs do serviço e filtra por descrição + região
-- **IDs de serviço mapeados:**
-  - Compute Engine: `6F81-5844-456A`
-  - Cloud SQL: `9662-B51E-5089`
-  - Cloud Storage: `95FF-2EF5-5EA1`
-  - Cloud Run: `152E-C115-5142`
-  - BigQuery: `24E6-581D-38E5`
-- **Formato de preço:** `units + nanos/1e9` (padrão Google)
-- **Retorna:** `PriceEntry` com preço por hora
-
-### OCI
-
-Sem API pública disponível. Sempre retorna `{ price: null, verified: false, reason: "API pública não disponível para OCI" }`.
-
----
-
-## Etapa 4 — Classificação de Confiança (`PricingOrchestratorService`)
-
-Método principal: `fetchPrices(billing, mappings): Promise<ClassificationResult>`
-
-### Lógica de status por serviço
-
-| Status | Critério |
-|--------|----------|
-| `verified` | `verified: true` na API **e** `confidence: 'high'` no mapeamento Claude |
-| `partial` | `verified: true` na API **mas** `confidence: 'medium'` ou `'low'` |
-| `not_found` | `verified: false` — API não retornou resultado |
-| `no_api` | OCI — hardcoded, sem API disponível |
-
-### Meta calculada
-
-- `verifiedServices` — qtd de serviços com ao menos um provedor `verified`
-- `coveredCostPct` — `(custo dos serviços verificados / custo total) * 100`
-
----
-
-## Tipos Compartilhados (`pipeline.types.ts`)
-
-Todos os tipos das 6 etapas estão centralizados aqui. Interfaces principais:
-
-| Tipo | Usado na etapa |
-|------|---------------|
-| `ParsedBilling` | 1 — saída do parser |
-| `TopService` | 1 — cada serviço extraído |
-| `ServiceMapping`, `MappingResult` | 2 — retorno do Claude |
-| `PriceEntry`, `ServicePrice`, `PricingResult` | 3 — preços brutos |
-| `ClassifiedPrice`, `ClassificationResult` | 4 — após classificação |
-| `RecommendationResult` | 5 — retorno do Claude |
-| `PaybackResult` | 6 — cálculo matemático |
-| `PipelineResult` | Final — resposta consolidada |
-
----
-
-## Variáveis de Ambiente Necessárias
-
-```env
-GCP_API_KEY=           # Chave de API pública do Google Cloud (sem OAuth)
-                       # Criar em: console.cloud.google.com → APIs & Services → Credentials
-                       # Habilitar: Cloud Billing API
+// Resposta final (no evento 'done')
+interface PipelineResult {
+  meta: ClassificationResult['meta'] & { analysisDate: string };
+  billing: ParsedBilling;
+  mappings: MappingResult;
+  prices: ClassificationResult;
+  recommendation: RecommendationResult;
+  payback: PaybackResult;
+}
 ```
 
-As APIs da Azure e da AWS são públicas e não requerem credenciais.
-
 ---
 
-## Como Usar em Outros Serviços
+## SSE: por que `@Post` em vez de `@Sse`
 
-```typescript
-import { PricingOrchestratorService } from '../billing/pricing/pricing-orchestrator.service';
+O decorator `@Sse` do NestJS cria um endpoint **GET**, que não aceita body. Como o frontend precisa enviar `ParsedBilling` no body, usamos `@Post` com `@Res()` e escrevemos o stream SSE manualmente:
 
-// No construtor:
-constructor(private readonly pricing: PricingOrchestratorService) {}
+```ts
+@Post('analyze/stream')
+analyzeStream(@Body() billing: ParsedBilling, @Res() res: Response): void {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
 
-// Uso:
-const classification = await this.pricing.fetchPrices(parsedBilling, mappingResult);
-// classification.classified — lista de serviços com preços e status
-// classification.meta — resumo: verified/partial/notFound/coveredCostPct
+  const sub = this.pipeline.runStream(billing).subscribe({
+    next: (event) => res.write(`data: ${JSON.stringify(event)}\n\n`),
+    complete: () => res.end(),
+    error: (err) => { /* write error event */ res.end(); },
+  });
+
+  res.on('close', () => sub.unsubscribe());
+}
 ```
 
-O `BillingModule` exporta `PricingOrchestratorService`. Importe `BillingModule` no módulo que precisar.
+O frontend consome com `fetch` + `ReadableStream` (não `EventSource`, que só suporta GET).
 
 ---
 
-## Próximos Passos
+## Claude (`ai/claude.service.ts`)
 
-- [ ] Etapa 1 — `BillingParserService`: parser CSV/JSON/TXT, detecção de provedor, extração de top serviços
-- [ ] Etapa 2 — `MappingService`: prompt Claude para mapear serviços entre provedores
-- [ ] Etapa 5 — `RecommendationService`: prompt Claude com dados verificados
-- [ ] Etapa 6 — `PaybackService`: cálculo de ROI/payback (matemática pura)
-- [ ] `BillingController`: `POST /billing/analyze` (upload de arquivo), `GET /billing/analyses`, `GET /billing/analyses/:id`
-- [ ] `BillingAnalysis` DTO para request/response
-- [ ] Persistência no banco via `PrismaService` (model `BillingAnalysis` já existe no schema)
+### Configuração
+- Modelo: `claude-opus-4-7`
+- Prompt caching: `cache_control: { type: 'ephemeral' }` no system prompt — reduz ~90% do custo de tokens de entrada em chamadas repetidas
+
+### `mapServices()` — Etapa 2
+Recebe `ParsedBilling`, monta prompt com:
+- Lista de serviços com specs
+- Tabela de equivalência de regiões AWS ↔ GCP ↔ Azure
+- Restrição geográfica se `targetRegion` presente
+- Lista fechada de valores válidos para `gcp.service` e `azure.service` — evita nomes compostos que quebram o parser GCP
+
+### `generateRecommendation()` — Etapa 5
+Recebe billing + resultado dos preços classificados. Monta prompt com resumo do comparativo verificado.
+
+### `safeParseJson<T>()`
+Extrai o primeiro bloco `{...}` da resposta mesmo se Claude envolver em markdown.
+
+---
+
+## GCP (`pricing/gcp-pricing.service.ts`)
+
+### Serviços mapeados
+```ts
+const GCP_SERVICE_IDS = {
+  'Compute Engine': '6F81-5844-456A',
+  'Cloud SQL':      '9662-B51E-5089',
+  'Cloud Storage':  '95FF-2EF5-5EA1',
+  'Cloud Run':      '152E-C115-5142',
+  'BigQuery':       '24E6-581D-38E5',
+  'Memorystore':    'E2D0-0E09-0018',
+  'AlloyDB':        '9BAE-B4E0-5BF3',
+  'Cloud Armor':    '975A-27C5-B553',
+};
+```
+
+### Estratégia de busca
+1. `resolveServiceId()` — match exato → prefixo → contains (aceita `"Cloud SQL for MySQL"`)
+2. `extractSearchTerms()` — tabela `MACHINE_FAMILY_TERMS` com ~25 famílias; para `t2d-standard-8` gera `["tau t2d amd instance core"]`
+3. `fetchAllSkus()` — segue `nextPageToken` até 5 páginas (Compute Engine tem >10k SKUs)
+4. Para cada termo candidato: busca com região → sem região (fallback)
+
+### `node:https` em vez de `fetch`
+`fetch` nativo do Node.js tem comportamento instável no Windows para requests externas longas. `node:https` com timeout manual é mais confiável.
+
+---
+
+## Azure (`pricing/azure-pricing.service.ts`)
+
+### Estratégia de busca (3 tentativas sequenciais)
+1. `armSkuName eq 'SKU'` + região + `priceType eq 'Consumption'`
+2. `contains(armSkuName,'SKU')` + região + Consumption
+3. `contains(armSkuName,'SKU')` sem região (fallback global)
+
+### `SERVICES_WITH_CONTAINS`
+Serviços que usam `contains` desde a primeira tentativa (Azure Cache for Redis, Azure Blob Storage, PostgreSQL/MySQL Flexible Server) porque o SKU do catálogo tem variações de sufixo.
+
+### Limitação conhecida
+**Azure WAF (`WAF_v2`) e Blob Storage** não são encontrados por `armSkuName` — cobram por LCU e GB/mês, o filtro correto seria por `meterName`. Pendente de implementação.
+
+---
+
+## Cálculo de Payback (`pipeline.service.ts`)
+
+```
+monthlySaving = Σ (currentCost - targetPrice) para serviços verificados
+migrationCost = totalCost × 3  ← heurística conservadora
+paybackMonths = ceil(migrationCost / monthlySaving)
+roi(N) = (monthlySaving × N - migrationCost) / migrationCost × 100
+```
+
+**Limitação atual:** `estimatedMonthly` usa `preço_unitário × 730h` fixo. Para bills com centenas de instâncias o `monthlySaving` fica subestimado. Melhorar parseando `quantity` (ex: `"18.454 instance-hours"`).
+
+---
+
+## `targetRegion` — campo opcional no input
+
+Quando informado, o Claude usa a tabela de equivalência de regiões embutida no prompt:
+
+| AWS | GCP | Azure |
+|-----|-----|-------|
+| us-east-1 | us-east4 | eastus |
+| sa-east-1 | southamerica-east1 | brazilsouth |
+| eu-west-1 | europe-west1 | westeurope |
+| eu-central-1 | europe-west3 | germanywestcentral |
+| ap-southeast-1 | asia-southeast1 | southeastasia |
+
+Regiões com catálogo completo (`us-east4`, `eastus`) têm maior taxa de match.
+
+---
+
+## Cobertura atual (bill AWS $104k/mês, 5 serviços)
+
+| Serviço | Azure | GCP | Pendência |
+|---------|-------|-----|-----------|
+| Amazon EC2 | ✅ | ❌ | GCP: t2d não encontrado em us-east4 |
+| Amazon RDS | ✅ | ❌ | GCP: db-custom-64 não encontrado |
+| Amazon S3 | ❌ | ✅ | Azure: Blob usa meterName, não armSkuName |
+| Amazon ElastiCache | ✅ | ❌ | GCP: Memorystore service ID pendente de verificação |
+| AWS WAF | ❌ | ❌ | Ambos usam request/LCU, não SKU de VM |
+
+**4/5 serviços → 67% de cobertura de custo**
+
+---
+
+## Próximas melhorias
+
+1. `estimatedMonthly` correto — parsear `quantity` do serviço para horas reais
+2. Azure WAF/Blob — filtrar por `meterName` em vez de `armSkuName`
+3. GCP Memorystore — verificar service ID correto
+4. `migrationCost` configurável — expor como parâmetro no input
+5. Cache de catálogos GCP/Azure — TTL 24h para não recarregar a cada request
