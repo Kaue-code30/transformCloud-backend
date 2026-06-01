@@ -1,23 +1,24 @@
 # Módulo: Billing — Pipeline V2
 
-> Atualizado em: 2026-05-22
-> Status: Funcional — 67% de cobertura verificada em bill real de $104k/mês
+> Atualizado em: 2026-06-01
+> Status: Funcional — 7 etapas, 4 provedores (GCP/Azure/AWS/OCI), catálogo local com sync automático
 
 ---
 
 ## Visão Geral
 
-Pipeline de análise de billing em 6 etapas. O frontend parseia o arquivo e envia o resultado estruturado; o backend orquestra mapeamento IA + APIs de preço + recomendação IA.
+Pipeline de análise de billing em 7 etapas. O frontend parseia o arquivo e envia o resultado estruturado; o backend orquestra mapeamento IA + APIs de preço + recomendação IA + análise multicloud.
 
 ```
 Frontend (parse)
     ↓ POST /api/billing/analyze/stream
-[1] ParsedBilling recebido
-[2] Claude Opus 4.7 — mapeia serviços AWS → GCP/Azure/OCI
-[3] APIs públicas — busca preços reais em paralelo
-[4] Classificação — verified / partial / not_found / no_api
-[5] Claude Opus 4.7 — recomendação baseada nos dados verificados
-[6] Código — payback e ROI (12/24/36 meses)
+[1] normalizeBilling  — remove não-técnicos/SavingsPlans, canonicaliza nomes, top 6
+[2] Mapeamento A+B+C  — tabela estática → Claude+catálogo → validação
+[3] Preços reais      — GCP / Azure / AWS / OCI em paralelo
+[4] Classificação     — verified / partial / not_found / no_api
+[5] Recomendação      — Claude Opus (melhor provedor único)
+[6] Payback/ROI       — código (12/24/36 meses + breakdown migração)
+[7] Multicloud        — Claude Opus (alocação ótima por serviço)
     ↓ SSE events → frontend
 ```
 
@@ -27,21 +28,26 @@ Frontend (parse)
 
 | Arquivo | Responsabilidade |
 |---------|-----------------|
-| `billing.controller.ts` | `POST /analyze/stream` — escreve SSE manualmente via `@Res()` |
-| `pipeline.service.ts` | Orquestra as 6 etapas, retorna `Observable<PipelineProgressEvent>` |
-| `ai/claude.service.ts` | Etapas 2 e 5 — chamadas ao Claude com prompt caching |
-| `pricing/pricing-orchestrator.service.ts` | Etapas 3+4 — chamadas paralelas + classificação |
+| `billing.controller.ts` | `POST /analyze/stream` — SSE manual via `@Res()` |
+| `pipeline.service.ts` | Orquestra as 7 etapas, emite `Observable<PipelineProgressEvent>` |
+| `ai/claude.service.ts` | Etapas 2B, 5, 7 — Claude com prompt caching |
+| `catalog/catalog-sync.service.ts` | `OnApplicationBootstrap` — baixa e salva catálogos (TTL 24h) |
+| `catalog/catalog-validator.service.ts` | Etapa C — valida SKUs do Claude contra catálogo local |
+| `mapping/mapping.service.ts` | Etapa 2 — orquestra A (estático) + B (Claude) + C (validação) |
+| `pricing/pricing-orchestrator.service.ts` | Etapas 3+4 — 4 provedores em paralelo + classificação |
 | `pricing/azure-pricing.service.ts` | Azure Retail Prices API |
 | `pricing/gcp-pricing.service.ts` | GCP Cloud Billing API |
-| `pricing/aws-pricing.service.ts` | AWS Pricing API (bulk JSON) |
-| `types/pipeline.types.ts` | Todos os tipos TypeScript do pipeline |
+| `pricing/aws-pricing.service.ts` | AWS Pricing API + cache em memória |
+| `pricing/oci-pricing.service.ts` | OCI Pricing API (Flex + fixed shapes) |
+| `pricing/catalog-fetcher.service.ts` | Monta `AvailableCatalog` para o Claude (constraint B) |
+| `pricing/sku-catalog.ts` | Tabela estática ~50 instanceTypes + listas de SKUs válidos |
+| `types/pipeline.types.ts` | Todos os tipos TypeScript |
 
 ---
 
 ## Tipos principais (`pipeline.types.ts`)
 
 ```ts
-// Input do frontend
 interface ParsedBilling {
   provider: 'AWS' | 'GCP' | 'AZURE' | 'OCI';
   period: { start: string; end: string };
@@ -49,166 +55,191 @@ interface ParsedBilling {
   totalCost: number;
   dataQuality: 'good' | 'partial' | 'poor';
   topServices: TopService[];
-  targetRegion?: string;  // "Brasil", "us-east-1", "Europa" — aumenta cobertura
+  targetRegion?: string;
 }
 
-// Evento SSE
-interface PipelineProgressEvent {
-  step: 'mapping' | 'pricing' | 'classification' | 'recommendation' | 'done' | 'error';
-  message: string;
-  data?: Partial<PipelineResult>;
-}
-
-// Resposta final (no evento 'done')
 interface PipelineResult {
-  meta: ClassificationResult['meta'] & { analysisDate: string };
-  billing: ParsedBilling;
-  mappings: MappingResult;
-  prices: ClassificationResult;
+  meta:           ClassificationResult['meta'] & { analysisDate: string };
+  billing:        ParsedBilling;
+  mappings:       MappingResult;
+  prices:         ClassificationResult;  // classified[] com status por provedor
   recommendation: RecommendationResult;
-  payback: PaybackResult;
+  payback:        PaybackResult;         // inclui migrationCostBreakdown
+  multicloud:     MulticloudResult;      // etapa 7
 }
+
+type PipelineStep = 'mapping' | 'pricing' | 'classification' | 'recommendation' | 'multicloud' | 'done' | 'error';
 ```
 
 ---
 
-## SSE: por que `@Post` em vez de `@Sse`
+## Estratégia de Mapeamento A+B+C (`mapping/mapping.service.ts`)
 
-O decorator `@Sse` do NestJS cria um endpoint **GET**, que não aceita body. Como o frontend precisa enviar `ParsedBilling` no body, usamos `@Post` com `@Res()` e escrevemos o stream SSE manualmente:
+### A — Tabela estática (`pricing/sku-catalog.ts`)
+Cobre ~50 instanceTypes EC2 comuns (M7g, M6i, C7g, C6i, R7g, R6i, RDS t3/m6g/r6g, ElastiCache t3/r7g/r6g). Para cada entry:
+- `awsService` + `awsInstanceType`
+- `gcp: { service, machineType }`
+- `azure: { service, skuName, sku }`
+- `oci: { service, shape, ocpu, memoryGb }`
+
+Hit → `confidence: high`, sem chamada IA.
+
+`extractInstanceType(specs)` extrai o instanceType do campo `specs` do serviço (ex: `"m7g.2xlarge, us-east-1, Linux"` → `"m7g.2xlarge"`).
+
+### B — Claude com catálogo real como constraint
+Serviços não resolvidos em A vão para `claude.service.ts:mapServicesWithCatalog()`.
+O Claude recebe o `AvailableCatalog` gerado pelo `CatalogFetcherService`:
+- GCP: lista de `machineTypes` e `services` do catálogo local
+- Azure: SKUs reais da região alvo (buscados na API)
+- OCI: shapes disponíveis
+- AWS: lista de services suportados
+
+Elimina SKUs inventados — o Claude só pode escolher valores da lista.
+
+### C — Validação pós-mapeamento (`catalog/catalog-validator.service.ts`)
+Verifica cada SKU mapeado pelo Claude contra os arquivos `catalogs/*.json`.
+- SKU encontrado → `confidence: high` → status `verified`
+- Não encontrado → mantém confidence original → `partial` (honesto: SKU não confirmado)
+
+`partial` após C significa genuinamente que o SKU pode não existir no catálogo atual.
+
+---
+
+## Sistema de Catálogos Locais (`catalog/catalog-sync.service.ts`)
+
+`OnApplicationBootstrap` — executa no startup sem bloquear o servidor.
+
+| Catálogo | Arquivo | TTL | Fonte |
+|---------|---------|-----|-------|
+| OCI | `catalogs/oci.json` | 24h | `apexapps.oracle.com/pls/apex/cetools/api/v1/products/` |
+| Azure | `catalogs/azure.json` | 24h | `prices.azure.com` (6 serviços × 4 regiões) |
+| GCP Compute Engine | `catalogs/gcp-6F81-5844-456A.json` | 24h | Cloud Billing API |
+| GCP Cloud SQL | `catalogs/gcp-9662-B51E-5089.json` | 24h | Cloud Billing API |
+| GCP Cloud Storage | `catalogs/gcp-95FF-2EF5-5EA1.json` | 24h | Cloud Billing API |
+| GCP Memorystore | `catalogs/gcp-E2D0-0E09-0018.json` | 24h | Cloud Billing API |
+| GCP Cloud Armor | `catalogs/gcp-975A-27C5-B553.json` | 24h | Cloud Billing API |
+| AWS EC2 us-east-1 | `catalogs/aws-AmazonEC2-us-east-1.json` | 24h | AWS Pricing API |
+| AWS RDS us-east-1 | `catalogs/aws-AmazonRDS-us-east-1.json` | 24h | AWS Pricing API |
+| … (4 serviços × 8 regiões) | | | |
+
+Todos os pricing services leem do arquivo local primeiro; só chamam a API se o arquivo não existir ou estiver corrompido.
+
+---
+
+## Pricing Services
+
+### GCP (`pricing/gcp-pricing.service.ts`)
+- `fetchAllSkus()` lê de `catalogs/gcp-{serviceId}.json` (fallback: API paginada)
+- `extractSearchTerms()`: termos por família de máquina (`MACHINE_FAMILY_TERMS`) ou por serviço (`SERVICE_FALLBACK_TERMS` — prioridade para Cloud Armor, Memorystore, Storage)
+- Busca com região → fallback sem região
+
+### Azure (`pricing/azure-pricing.service.ts`)
+- `findInLocalCatalog()`: busca no `catalogs/azure.json` por `armSkuName` + `armRegionName`
+- Fallback: 3 tentativas à API (exact → contains → sem região)
+
+### AWS (`pricing/aws-pricing.service.ts`)
+- `loadCatalog()`: lê de `catalogs/aws-{service}-{region}.json` → fallback download completo (90s)
+- Cache em memória (`Map`) por `service/region` — determinístico entre chamadas
+- `UNSUPPORTED_SERVICES`: WAFv2, Shield, CloudFront retornam `not_found` imediatamente (cobram por request, não têm index.json)
+- Falhas não entram no cache (permite retry)
+
+### OCI (`pricing/oci-pricing.service.ts`)
+- `loadCatalog()`: lê de `catalogs/oci.json` → fallback chamada direta à API
+- Flex shapes: busca dois SKUs (OCPU + memória) por família → `(ocpuPrice × ocpu) + (memPrice × memGb)`
+- Fixed shapes (MySQL, Redis Cache): busca por `displayName` + `serviceCategory`
+
+---
+
+## Classificação de Status
 
 ```ts
-@Post('analyze/stream')
-analyzeStream(@Body() billing: ParsedBilling, @Res() res: Response): void {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  const sub = this.pipeline.runStream(billing).subscribe({
-    next: (event) => res.write(`data: ${JSON.stringify(event)}\n\n`),
-    complete: () => res.end(),
-    error: (err) => { /* write error event */ res.end(); },
-  });
-
-  res.on('close', () => sub.unsubscribe());
+resolveStatus(entry: PriceEntry, confidence: Confidence | null): VerificationStatus {
+  if (!entry.verified || entry.price === null) return 'not_found';
+  if (confidence === 'high') return 'verified';
+  if (confidence === 'medium' || confidence === 'low') return 'partial';
+  return 'verified';
 }
 ```
 
-O frontend consome com `fetch` + `ReadableStream` (não `EventSource`, que só suporta GET).
+`partial` após validação C = SKU mapeado pelo Claude que não foi encontrado no catálogo local.
+
+---
+
+## Análise Multicloud (Etapa 7)
+
+`claude.service.ts:generateMulticloudAnalysis()` recebe preços de todos os provedores + economia do single-provider.
+
+**Regras de domínio no prompt:**
+1. Banco + cache ficam no mesmo provedor que compute
+2. Storage penalizado quando compute está em provedor diferente (egress)
+3. Diferença < 10% → mantém mesmo provedor (complexidade não vale)
+
+**`MulticloudResult`:**
+```ts
+{
+  totalEstimatedMonthlyCost: number;
+  totalMonthlySaving: number;
+  savingPct: number;
+  coveredServices: number;
+  allocations: Array<{
+    service: string;
+    recommendedProvider: CloudProvider;
+    estimatedMonthlyCost: number;
+    saving: number;
+    reason: string;
+  }>;
+  tradeoffs: { egressCostWarning; operationalComplexity; recommendation };
+  vsSingleProvider: { singleProviderSaving; multicloudExtraSaving; worthIt; justification };
+}
+```
+
+Fallback sem Claude: menor preço verificado por serviço (determinístico).
+
+---
+
+## Payback/ROI (`pipeline.service.ts`)
+
+```
+monthlySaving = Σ (currentCost − targetPrice) para serviços verificados
+migrationCost = totalCost × 3  (operação dual durante migração)
+paybackMonths = ceil(migrationCost / monthlySaving)
+roi(N)        = (monthlySaving × N − migrationCost) / migrationCost × 100
+```
+
+`migrationCostBreakdown: { multiplier: 3, monthlyBase, rationale }` — exposto para o frontend mostrar o cálculo.
+
+**Savings Plans filtrados:** `SAVINGS_PLAN_PATTERN` remove linhas de desconto AWS (`savings plan`, `reserved instance`) do `topServices` — são desconto sobre EC2/RDS, não serviços independentes.
 
 ---
 
 ## Claude (`ai/claude.service.ts`)
 
-### Configuração
-- Modelo: `claude-opus-4-7`
-- Prompt caching: `cache_control: { type: 'ephemeral' }` no system prompt — reduz ~90% do custo de tokens de entrada em chamadas repetidas
+| Método | Etapa | max_tokens | Descrição |
+|--------|-------|-----------|-----------|
+| `mapServices()` | 2 (legacy) | 8192 | Mapeamento sem catálogo — mantido para compatibilidade |
+| `mapServicesWithCatalog()` | 2B | 8192 | Mapeamento com lista de SKUs reais como constraint |
+| `generateRecommendation()` | 5 | 2048 | Melhor provedor único com justificativa CFA |
+| `generateMulticloudAnalysis()` | 7 | 3000 | Alocação ótima por serviço entre os 4 provedores |
 
-### `mapServices()` — Etapa 2
-Recebe `ParsedBilling`, monta prompt com:
-- Lista de serviços com specs
-- Tabela de equivalência de regiões AWS ↔ GCP ↔ Azure
-- Restrição geográfica se `targetRegion` presente
-- Lista fechada de valores válidos para `gcp.service` e `azure.service` — evita nomes compostos que quebram o parser GCP
-
-### `generateRecommendation()` — Etapa 5
-Recebe billing + resultado dos preços classificados. Monta prompt com resumo do comparativo verificado.
-
-### `safeParseJson<T>()`
-Extrai o primeiro bloco `{...}` da resposta mesmo se Claude envolver em markdown.
+Prompt caching ativo no system prompt (`cache_control: ephemeral`) — reduz ~90% do custo em chamadas repetidas.
 
 ---
 
-## GCP (`pricing/gcp-pricing.service.ts`)
+## Normalização do Input (`pipeline.service.ts:normalizeBilling`)
 
-### Serviços mapeados
-```ts
-const GCP_SERVICE_IDS = {
-  'Compute Engine': '6F81-5844-456A',
-  'Cloud SQL':      '9662-B51E-5089',
-  'Cloud Storage':  '95FF-2EF5-5EA1',
-  'Cloud Run':      '152E-C115-5142',
-  'BigQuery':       '24E6-581D-38E5',
-  'Memorystore':    'E2D0-0E09-0018',
-  'AlloyDB':        '9BAE-B4E0-5BF3',
-  'Cloud Armor':    '975A-27C5-B553',
-};
-```
-
-### Estratégia de busca
-1. `resolveServiceId()` — match exato → prefixo → contains (aceita `"Cloud SQL for MySQL"`)
-2. `extractSearchTerms()` — tabela `MACHINE_FAMILY_TERMS` com ~25 famílias; para `t2d-standard-8` gera `["tau t2d amd instance core"]`
-3. `fetchAllSkus()` — segue `nextPageToken` até 5 páginas (Compute Engine tem >10k SKUs)
-4. Para cada termo candidato: busca com região → sem região (fallback)
-
-### `node:https` em vez de `fetch`
-`fetch` nativo do Node.js tem comportamento instável no Windows para requests externas longas. `node:https` com timeout manual é mais confiável.
+- Remove serviços não-técnicos: `tax`, `support`, `credits`, `refund`, `discount`
+- Remove Savings Plans/Reserved Instances (`SAVINGS_PLAN_PATTERN`)
+- Canonicaliza nomes genéricos (ex: `"rds"` → `"Amazon RDS"`) via `SERVICE_NAME_MAP`
+- Ordena por custo e limita a top 6 serviços
 
 ---
 
-## Azure (`pricing/azure-pricing.service.ts`)
+## Cobertura (branch `feature/mapping-static-catalog`)
 
-### Estratégia de busca (3 tentativas sequenciais)
-1. `armSkuName eq 'SKU'` + região + `priceType eq 'Consumption'`
-2. `contains(armSkuName,'SKU')` + região + Consumption
-3. `contains(armSkuName,'SKU')` sem região (fallback global)
+Bill AWS $104k/mês testado com 5 serviços:
+- EC2, RDS, ElastiCache: verificados em múltiplos provedores
+- S3: verificado em GCP e Azure
+- AWS WAF: `not_found` (cobra por request — sem SKU por hora)
 
-### `SERVICES_WITH_CONTAINS`
-Serviços que usam `contains` desde a primeira tentativa (Azure Cache for Redis, Azure Blob Storage, PostgreSQL/MySQL Flexible Server) porque o SKU do catálogo tem variações de sufixo.
-
-### Limitação conhecida
-**Azure WAF (`WAF_v2`) e Blob Storage** não são encontrados por `armSkuName` — cobram por LCU e GB/mês, o filtro correto seria por `meterName`. Pendente de implementação.
-
----
-
-## Cálculo de Payback (`pipeline.service.ts`)
-
-```
-monthlySaving = Σ (currentCost - targetPrice) para serviços verificados
-migrationCost = totalCost × 3  ← heurística conservadora
-paybackMonths = ceil(migrationCost / monthlySaving)
-roi(N) = (monthlySaving × N - migrationCost) / migrationCost × 100
-```
-
-**Limitação atual:** `estimatedMonthly` usa `preço_unitário × 730h` fixo. Para bills com centenas de instâncias o `monthlySaving` fica subestimado. Melhorar parseando `quantity` (ex: `"18.454 instance-hours"`).
-
----
-
-## `targetRegion` — campo opcional no input
-
-Quando informado, o Claude usa a tabela de equivalência de regiões embutida no prompt:
-
-| AWS | GCP | Azure |
-|-----|-----|-------|
-| us-east-1 | us-east4 | eastus |
-| sa-east-1 | southamerica-east1 | brazilsouth |
-| eu-west-1 | europe-west1 | westeurope |
-| eu-central-1 | europe-west3 | germanywestcentral |
-| ap-southeast-1 | asia-southeast1 | southeastasia |
-
-Regiões com catálogo completo (`us-east4`, `eastus`) têm maior taxa de match.
-
----
-
-## Cobertura atual (bill AWS $104k/mês, 5 serviços)
-
-| Serviço | Azure | GCP | Pendência |
-|---------|-------|-----|-----------|
-| Amazon EC2 | ✅ | ❌ | GCP: t2d não encontrado em us-east4 |
-| Amazon RDS | ✅ | ❌ | GCP: db-custom-64 não encontrado |
-| Amazon S3 | ❌ | ✅ | Azure: Blob usa meterName, não armSkuName |
-| Amazon ElastiCache | ✅ | ❌ | GCP: Memorystore service ID pendente de verificação |
-| AWS WAF | ❌ | ❌ | Ambos usam request/LCU, não SKU de VM |
-
-**4/5 serviços → 67% de cobertura de custo**
-
----
-
-## Próximas melhorias
-
-1. `estimatedMonthly` correto — parsear `quantity` do serviço para horas reais
-2. Azure WAF/Blob — filtrar por `meterName` em vez de `armSkuName`
-3. GCP Memorystore — verificar service ID correto
-4. `migrationCost` configurável — expor como parâmetro no input
-5. Cache de catálogos GCP/Azure — TTL 24h para não recarregar a cada request
+**Tabela estática:** 100% dos instanceTypes comuns → `verified` imediato
+**Claude + catálogo:** cobertura de serviços sem instanceType explícito (Cloud Armor, Memorystore, Storage)
