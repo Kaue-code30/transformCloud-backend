@@ -6,6 +6,7 @@ import { PricingOrchestratorService } from './pricing/pricing-orchestrator.servi
 import { OciPricingService } from './pricing/oci-pricing.service';
 import { CatalogFetcherService } from './pricing/catalog-fetcher.service';
 import { CatalogSyncService } from './catalog/catalog-sync.service';
+import { CatalogValidatorService } from './catalog/catalog-validator.service';
 import { ClaudeService } from './ai/claude.service';
 import { MappingService } from './mapping/mapping.service';
 import { PipelineService } from './pipeline.service';
@@ -21,6 +22,7 @@ import { BillingController } from './billing.controller';
     PricingOrchestratorService,
     CatalogFetcherService,
     CatalogSyncService,
+    CatalogValidatorService,
     ClaudeService,
     MappingService,
     PipelineService,

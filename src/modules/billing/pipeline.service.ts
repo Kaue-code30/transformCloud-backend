@@ -111,6 +111,10 @@ const NON_TECHNICAL_SERVICES = new Set([
   'tax', 'support', 'credits', 'refund', 'discount',
 ]);
 
+// Savings Plans e Reserved Instances são desconto sobre EC2/RDS, não serviços distintos.
+// Serão consolidados com o serviço-pai para evitar dupla contagem.
+const SAVINGS_PLAN_PATTERN = /savings.plan|reserved.instance|compute.savings/i;
+
 // Nomes genéricos que o frontend pode enviar → nome canônico AWS para o Claude entender melhor
 const SERVICE_NAME_MAP: Record<string, string> = {
   'ec2-instances':    'Amazon EC2',
@@ -134,10 +138,13 @@ const SERVICE_NAME_MAP: Record<string, string> = {
 
 function normalizeBilling(billing: ParsedBilling): ParsedBilling {
   const filtered = (billing.topServices ?? [])
-    // Remove serviços não-técnicos (Tax, Support, Credits, etc.)
+    // Remove serviços não-técnicos e Savings Plans (desconto sobre EC2, não serviço distinto)
     .filter((s) => {
       const lower = (s.name ?? '').toLowerCase().trim();
-      return lower && !NON_TECHNICAL_SERVICES.has(lower);
+      if (!lower) return false;
+      if (NON_TECHNICAL_SERVICES.has(lower)) return false;
+      if (SAVINGS_PLAN_PATTERN.test(s.name ?? '')) return false;
+      return true;
     })
     // Normaliza nomes genéricos para nomes canônicos AWS
     .map((s) => {

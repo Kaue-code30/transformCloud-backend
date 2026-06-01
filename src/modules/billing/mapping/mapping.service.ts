@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ClaudeService } from '../ai/claude.service';
 import { CatalogFetcherService } from '../pricing/catalog-fetcher.service';
+import { CatalogValidatorService } from '../catalog/catalog-validator.service';
 import { lookupStaticSku } from '../pricing/sku-catalog';
 import type { ParsedBilling, MappingResult, ServiceMapping } from '../types/pipeline.types';
 
@@ -11,6 +12,7 @@ export class MappingService {
   constructor(
     private readonly claude: ClaudeService,
     private readonly catalogFetcher: CatalogFetcherService,
+    private readonly validator: CatalogValidatorService,
   ) {}
 
   /**
@@ -106,7 +108,11 @@ export class MappingService {
       );
     });
 
-    return { mappings: combined };
+    // Etapa C: valida cada mapeamento contra o catálogo local
+    // Se o SKU existe no arquivo → eleva confidence para 'high' (elimina parciais espúrios)
+    const validated = this.validator.validateAndUpgrade(combined);
+
+    return { mappings: validated };
   }
 }
 
