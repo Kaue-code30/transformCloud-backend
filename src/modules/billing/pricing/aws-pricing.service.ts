@@ -2,15 +2,12 @@ import * as https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { PriceEntry } from '../types/pipeline.types';
 
-// AWS Pricing API — endpoint de filtros por atributo (sem autenticação, sem bulk JSON)
-// Docs: https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/price-list-query-api.html
 const AWS_PRICING_API = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws';
 
 interface AwsPricingTerm {
   priceDimensions: Record<string, {
     pricePerUnit: { USD: string };
     unit: string;
-    description: string;
   }>;
 }
 
@@ -20,30 +17,26 @@ interface AwsPricingProduct {
     operatingSystem?: string;
     tenancy?: string;
     location?: string;
-    servicecode?: string;
     databaseEngine?: string;
     deploymentOption?: string;
     cacheEngine?: string;
+    usagetype?: string;
   };
 }
 
-interface AwsOffersResponse {
+interface AwsOffersFile {
   products: Record<string, AwsPricingProduct>;
-  terms: {
-    OnDemand?: Record<string, Record<string, AwsPricingTerm>>;
-  };
+  terms: { OnDemand?: Record<string, Record<string, AwsPricingTerm>> };
 }
 
 export interface AwsPricingParams {
-  service: 'AmazonEC2' | 'AmazonRDS' | 'AmazonS3' | 'AWSLambda' | 'AmazonElastiCache' | string;
+  service: string;
   region: string;
   instanceType?: string;
   operatingSystem?: string;
   databaseEngine?: string;
-  deploymentOption?: string;
 }
 
-// Mapa de regiões AWS para o nome legível usado nos filtros da API
 const AWS_REGION_NAMES: Record<string, string> = {
   'us-east-1':      'US East (N. Virginia)',
   'us-east-2':      'US East (Ohio)',
@@ -60,165 +53,131 @@ const AWS_REGION_NAMES: Record<string, string> = {
   'ap-south-1':     'Asia Pacific (Mumbai)',
   'sa-east-1':      'South America (Sao Paulo)',
   'ca-central-1':   'Canada (Central)',
-  'me-south-1':     'Middle East (Bahrain)',
-  'af-south-1':     'Africa (Cape Town)',
 };
 
-// Tamanho máximo de dados a carregar por streaming (5 MB) — evita OOM com arquivos grandes
-const MAX_BYTES = 5 * 1024 * 1024;
-// Timeout por request
-const REQUEST_TIMEOUT_MS = 20_000;
+// Cache por "service/region" — carregado uma vez, reutilizado em todas as chamadas
+// Determinístico: elimina a variabilidade do streaming parcial
+const catalogCache = new Map<string, Promise<AwsOffersFile>>();
+
+function fetchJson(url: string, timeoutMs: number): Promise<AwsOffersFile> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as AwsOffersFile);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      res.on('error', reject);
+    });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error(`Timeout ${timeoutMs}ms`)); });
+    req.on('error', reject);
+  });
+}
 
 @Injectable()
 export class AwsPricingService {
   private readonly logger = new Logger(AwsPricingService.name);
 
   async getPrice(params: AwsPricingParams, quantityHours: number): Promise<PriceEntry> {
-    if (!params.instanceType && params.service === 'AmazonEC2') {
+    const regionName = AWS_REGION_NAMES[params.region];
+    if (!regionName) {
+      return { price: null, verified: false, reason: `Região AWS ${params.region} não mapeada` };
+    }
+    if (!params.instanceType) {
       return { price: null, verified: false, reason: 'instanceType não informado' };
     }
 
-    const regionName = AWS_REGION_NAMES[params.region];
-    if (!regionName) {
-      return { price: null, verified: false, reason: `Região ${params.region} não mapeada` };
-    }
-
     try {
-      const url = `${AWS_PRICING_API}/${params.service}/current/${params.region}/index.json`;
+      const catalog = await this.loadCatalog(params.service, params.region);
+      const sku = this.findSku(catalog, params, regionName);
 
-      // Faz streaming parcial: lê até MAX_BYTES e tenta encontrar o produto antes de carregar tudo
-      const partial = await this.fetchPartial(url, MAX_BYTES);
-      const data = this.parsePartialJson(partial, params, regionName);
-
-      if (!data) {
-        // Se o produto não estava nos primeiros 5MB, tenta carregar mais 10MB
-        const larger = await this.fetchPartial(url, 15 * 1024 * 1024);
-        const data2 = this.parsePartialJson(larger, params, regionName);
-        if (!data2) {
-          return {
-            price: null,
-            verified: false,
-            reason: `Produto ${params.instanceType ?? params.service} não encontrado nos primeiros 15MB do catálogo`,
-          };
-        }
-        return this.buildEntry(data2, quantityHours);
+      if (!sku) {
+        return {
+          price: null,
+          verified: false,
+          reason: `${params.instanceType} não encontrado no catálogo AWS ${params.service}/${params.region}`,
+        };
       }
 
-      return this.buildEntry(data, quantityHours);
+      const hourlyPrice = this.extractPrice(catalog, sku);
+      if (hourlyPrice === null) {
+        return { price: null, verified: false, reason: 'Preço OnDemand não encontrado para o SKU' };
+      }
+
+      this.logger.debug(`AWS match: ${params.service} ${params.instanceType}/${params.region} — $${hourlyPrice}/h`);
+
+      return {
+        price: hourlyPrice,
+        unit: 'hora',
+        estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
+        source: 'AWS Pricing API',
+        verified: true,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Erro ao consultar AWS Pricing (${params.service}/${params.region}): ${msg}`);
-      return { price: null, verified: false, reason: `Erro na requisição: ${msg}` };
+      this.logger.error(`AWS Pricing error (${params.service}/${params.region}): ${msg}`);
+      return { price: null, verified: false, reason: `Erro AWS Pricing: ${msg}` };
     }
   }
 
-  // ─── Streaming parcial ────────────────────────────────────────────────────
+  // ─── Cache por service+region ─────────────────────────────────────────────
 
-  private fetchPartial(url: string, maxBytes: number): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const req = https.get(url, (res) => {
-        let body = '';
-        let bytes = 0;
-
-        res.on('data', (chunk: Buffer) => {
-          body += chunk.toString();
-          bytes += chunk.length;
-          if (bytes >= maxBytes) {
-            req.destroy();
-            resolve(body);
-          }
-        });
-        res.on('end', () => resolve(body));
-        res.on('error', reject);
+  private loadCatalog(service: string, region: string): Promise<AwsOffersFile> {
+    const key = `${service}/${region}`;
+    if (!catalogCache.has(key)) {
+      const url = `${AWS_PRICING_API}/${service}/current/${region}/index.json`;
+      this.logger.log(`AWS: carregando catálogo ${key}...`);
+      // Timeout de 90s — arquivos chegam a ~100MB mas o download acontece uma só vez
+      const promise = fetchJson(url, 90_000).then((data) => {
+        this.logger.log(`AWS: catálogo ${key} carregado (${Object.keys(data.products ?? {}).length} produtos)`);
+        return data;
       });
-
-      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-        req.destroy();
-        reject(new Error(`Timeout ${REQUEST_TIMEOUT_MS}ms — AWS Pricing`));
-      });
-      req.on('error', (err) => {
-        // ECONNRESET é esperado quando destruímos a conexão após maxBytes
-        if ((err as NodeJS.ErrnoException).code === 'ECONNRESET') {
-          resolve('');
-        } else {
-          reject(err);
-        }
-      });
-    });
+      catalogCache.set(key, promise);
+    }
+    return catalogCache.get(key)!;
   }
 
-  // ─── Parse do JSON parcial ────────────────────────────────────────────────
+  // ─── Busca determinística no catálogo ────────────────────────────────────
 
-  private parsePartialJson(
-    raw: string,
-    params: AwsPricingParams,
-    regionName: string,
-  ): { sku: string; hourlyPrice: number } | null {
-    if (!raw) return null;
-
-    // Estratégia: extrai pares "SKU": {...} individualmente via regex
-    // Evita fazer JSON.parse de um objeto de 100MB incompleto
-    const productRegex = /"([A-Z0-9]{16,})":\s*\{"attributes":\{([^}]+)\}/g;
-    let match: RegExpExecArray | null;
-
-    const candidates: string[] = [];
-
-    while ((match = productRegex.exec(raw)) !== null) {
-      const sku = match[1];
-      const attrs = match[2];
-
-      if (!attrs.includes(regionName.replace(/[()]/g, '\\$&'))) continue;
-      if (attrs.replace(/\\"/g, '').includes(regionName) === false) continue;
+  private findSku(catalog: AwsOffersFile, params: AwsPricingParams, regionName: string): string | null {
+    for (const [sku, product] of Object.entries(catalog.products ?? {})) {
+      const a = product.attributes;
+      if (a.location !== regionName) continue;
+      if (a.instanceType !== params.instanceType) continue;
 
       if (params.service === 'AmazonEC2') {
-        if (!params.instanceType) continue;
-        if (!attrs.includes(`"instanceType":"${params.instanceType}"`)) continue;
         const os = params.operatingSystem ?? 'Linux';
-        if (!attrs.includes(`"operatingSystem":"${os}"`)) continue;
-        if (!attrs.includes('"tenancy":"Shared"')) continue;
+        if (a.operatingSystem !== os) continue;
+        if (a.tenancy !== 'Shared') continue;
+        // Exclui instâncias dedicadas e bare metal
+        if (a.usagetype?.includes('Dedicated') || a.usagetype?.includes('Host')) continue;
       } else if (params.service === 'AmazonRDS') {
-        if (!params.instanceType) continue;
-        if (!attrs.includes(`"instanceType":"${params.instanceType}"`)) continue;
-        if (params.databaseEngine && !attrs.toLowerCase().includes(params.databaseEngine.toLowerCase())) continue;
-      } else if (params.service === 'AmazonElastiCache') {
-        if (!params.instanceType) continue;
-        if (!attrs.includes(`"instanceType":"${params.instanceType}"`)) continue;
-      }
-
-      candidates.push(sku);
-      if (candidates.length >= 3) break;
-    }
-
-    if (!candidates.length) return null;
-
-    // Agora busca o preço OnDemand para cada candidato
-    for (const sku of candidates) {
-      const priceRegex = new RegExp(
-        `"${sku}":\\s*\\{[^}]*"priceDimensions":\\s*\\{[^}]*"pricePerUnit":\\s*\\{[^}]*"USD":\\s*"([\\d.]+)"`,
-        's',
-      );
-      const priceMatch = priceRegex.exec(raw);
-      if (priceMatch) {
-        const hourlyPrice = parseFloat(priceMatch[1]);
-        if (!isNaN(hourlyPrice) && hourlyPrice > 0) {
-          return { sku, hourlyPrice };
+        if (a.deploymentOption && a.deploymentOption !== 'Single-AZ') continue;
+        if (params.databaseEngine) {
+          const engine = a.databaseEngine?.toLowerCase() ?? '';
+          if (!engine.includes(params.databaseEngine.toLowerCase())) continue;
         }
       }
-    }
 
+      return sku;
+    }
     return null;
   }
 
-  private buildEntry(
-    data: { sku: string; hourlyPrice: number },
-    quantityHours: number,
-  ): PriceEntry {
-    return {
-      price: data.hourlyPrice,
-      unit: 'hora',
-      estimatedMonthly: Number((data.hourlyPrice * quantityHours).toFixed(2)),
-      source: 'AWS Pricing API',
-      verified: true,
-    };
+  private extractPrice(catalog: AwsOffersFile, sku: string): number | null {
+    const onDemand = catalog.terms?.OnDemand?.[sku];
+    if (!onDemand) return null;
+
+    for (const term of Object.values(onDemand)) {
+      for (const dim of Object.values(term.priceDimensions)) {
+        const usd = parseFloat(dim.pricePerUnit.USD);
+        if (!isNaN(usd) && usd > 0) return usd;
+      }
+    }
+    return null;
   }
 }

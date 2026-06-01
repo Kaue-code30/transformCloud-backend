@@ -3,7 +3,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OciMapping, PriceEntry } from '../types/pipeline.types';
 
 const OCI_PRICING_API = 'https://apexapps.oracle.com/pls/apex/cetools/api/v1/products/';
-const PAGE_SIZE = 1000;
 // Flex shapes cobram OCPU e memória por separado — precisamos dos dois SKUs
 const OCPU_KEYWORDS = ['ocpu', 'vcpu', 'cpu'];
 const MEM_KEYWORDS  = ['memory', 'ram', 'gb memory'];
@@ -219,34 +218,19 @@ export class OciPricingService {
   }
 
   // ─── Carregamento do catálogo completo ───────────────────────────────────
+  // A API OCI só suporta ?partNumber e ?currencyCode como filtros oficiais.
+  // Sem parâmetros ela retorna todos os produtos de uma vez — carregamos uma
+  // única vez por processo e cacheamos permanentemente.
 
   private loadCatalog(): Promise<OciProduct[]> {
     if (this.catalog) return Promise.resolve(this.catalog);
     if (this.catalogLoading) return this.catalogLoading;
 
     this.catalogLoading = (async () => {
-      const all: OciProduct[] = [];
-      let offset = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        const url = `${OCI_PRICING_API}?limit=${PAGE_SIZE}&offset=${offset}`;
-        const body = await httpsGet(url, 30_000);
-        const data = JSON.parse(body) as OciApiResponse;
-
-        if (!data.items?.length) break;
-        all.push(...data.items);
-
-        // hasMore presente na resposta ou inferido pelo count
-        hasMore = data.hasMore === true || data.items.length === PAGE_SIZE;
-        offset += data.items.length;
-
-        this.logger.log(`OCI catálogo: ${all.length} produtos carregados`);
-
-        // Limite de segurança: máximo 20k produtos (~20 páginas)
-        if (offset >= 20_000) break;
-      }
-
+      this.logger.log('OCI: carregando catálogo completo...');
+      const body = await httpsGet(OCI_PRICING_API, 60_000);
+      const data = JSON.parse(body) as OciApiResponse;
+      const all = data.items ?? [];
       this.catalog = all;
       this.logger.log(`OCI catálogo completo: ${all.length} produtos`);
       return all;
