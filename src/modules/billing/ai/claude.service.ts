@@ -7,6 +7,7 @@ import type {
   ClassificationResult,
   RecommendationResult,
 } from '../types/pipeline.types';
+import type { AvailableCatalog } from '../pricing/catalog-fetcher.service';
 
 @Injectable()
 export class ClaudeService {
@@ -41,6 +42,26 @@ Responda SEMPRE em JSON válido conforme o schema solicitado. Sem texto extra fo
     const parsed = safeParseJson<MappingResult>(raw);
     if (!parsed) {
       this.logger.error('Resposta de mapeamento não é JSON válido');
+      return { mappings: [] };
+    }
+
+    return parsed;
+  }
+
+  // ─── Etapa 2B: Mapeamento com catálogo real como constraint ─────────────────
+
+  async mapServicesWithCatalog(
+    billing: ParsedBilling,
+    catalog: AvailableCatalog,
+  ): Promise<MappingResult> {
+    const prompt = buildMappingPromptWithCatalog(billing, catalog);
+
+    const raw = await this.ask(prompt, 8192);
+    if (!raw) return { mappings: [] };
+
+    const parsed = safeParseJson<MappingResult>(raw);
+    if (!parsed) {
+      this.logger.error('Resposta de mapeamento (com catálogo) não é JSON válido');
       return { mappings: [] };
     }
 
@@ -230,6 +251,62 @@ Retorne JSON no formato exato:
   },
   "insights": ["<insight 1>", "<insight 2>"],
   "summary": "<resumo executivo em 2-3 frases>"
+}`;
+}
+
+function buildMappingPromptWithCatalog(
+  billing: ParsedBilling,
+  catalog: AvailableCatalog,
+): string {
+  const services = (billing.topServices ?? [])
+    .map((s) => `- ${s.name ?? '?'} | specs: ${s.specs ?? '-'} | custo: ${s.cost ?? 0} | qtd: ${s.quantity ?? '-'}`)
+    .join('\n');
+
+  const regionConstraint = billing.targetRegion
+    ? `\nRESTRIÇÃO DE REGIÃO: O cliente EXIGE serviços na região "${billing.targetRegion}" ou equivalente próximo.`
+    : '';
+
+  const gcpTypes = catalog.gcp.machineTypes.slice(0, 40).join(', ');
+  const azureSkus = catalog.azure.skus.slice(0, 40).join(', ');
+  const ociShapes = catalog.oci.shapes.slice(0, 20).join(', ');
+
+  return `Mapeie os seguintes serviços ${billing.provider} para equivalentes em GCP, Azure, AWS e OCI.
+${regionConstraint}
+
+Serviços a mapear:
+${services}
+
+CATÁLOGO REAL DISPONÍVEL — use APENAS valores desta lista:
+
+GCP services: ${catalog.gcp.services.join(', ')}
+GCP machineTypes disponíveis: ${gcpTypes}
+
+Azure services: ${catalog.azure.services.join(', ')}
+Azure SKUs disponíveis: ${azureSkus}
+
+AWS services: ${catalog.aws.services.join(', ')}
+
+OCI services: ${catalog.oci.services.join(', ')}
+OCI shapes disponíveis: ${ociShapes}
+
+REGRAS:
+- gcp.machineType: SOMENTE um valor da lista GCP machineTypes acima
+- azure.skuName e azure.sku: SOMENTE um valor da lista Azure SKUs acima
+- oci.shape: SOMENTE um valor da lista OCI shapes acima
+- Se não houver equivalente razoável, omita o bloco do provedor (não invente)
+- Regiões: use identificadores exatos (ex: "us-east4", "eastus", "sa-east-1")
+
+Retorne JSON no formato exato:
+{
+  "mappings": [
+    {
+      "original": "<nome original>",
+      "gcp": { "service": "Compute Engine", "machineType": "n2-standard-8", "region": "us-east4", "confidence": "high|medium|low" },
+      "azure": { "service": "Virtual Machines", "skuName": "Standard_D8s_v5", "sku": "Standard_D8s_v5", "region": "eastus", "confidence": "high|medium|low" },
+      "aws": { "service": "AmazonEC2", "instanceType": "m7g.2xlarge", "region": "us-east-1", "operatingSystem": "Linux", "confidence": "high|medium|low" },
+      "oci": { "service": "Compute", "shape": "VM.Standard.E4.Flex", "ocpu": 4, "memoryGb": 32, "confidence": "high|medium|low" }
+    }
+  ]
 }`;
 }
 

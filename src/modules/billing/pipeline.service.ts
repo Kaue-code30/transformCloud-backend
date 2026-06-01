@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ClaudeService } from './ai/claude.service';
+import { MappingService } from './mapping/mapping.service';
 import { PricingOrchestratorService } from './pricing/pricing-orchestrator.service';
 import type {
   ParsedBilling,
@@ -15,6 +16,7 @@ import type {
 export class PipelineService {
   constructor(
     private readonly claude: ClaudeService,
+    private readonly mapping: MappingService,
     private readonly pricing: PricingOrchestratorService,
   ) {}
 
@@ -28,9 +30,9 @@ export class PipelineService {
 
           const partial: Partial<PipelineResult> = { billing: billingNormalized };
 
-          // Etapa 2: mapeamento (Claude)
-          subscriber.next({ step: 'mapping', message: `Mapeando ${billingNormalized.topServices.length} serviços com IA...` });
-          partial.mappings = await this.claude.mapServices(billingNormalized);
+          // Etapa 2: mapeamento (estático A + Claude com catálogo B)
+          subscriber.next({ step: 'mapping', message: `Mapeando ${billingNormalized.topServices.length} serviços...` });
+          partial.mappings = await this.mapping.mapServices(billingNormalized);
           subscriber.next({
             step: 'mapping',
             message: `${partial.mappings.mappings.length} serviços mapeados`,
@@ -158,15 +160,15 @@ function calculatePayback(
   const provider = recommendation.recommendation.provider.toLowerCase() as
     | 'gcp'
     | 'azure'
+    | 'aws'
     | 'oci';
 
   const monthlySaving = prices.classified.reduce((acc, c) => {
     const targetPrice =
-      provider === 'gcp'
-        ? c.gcp.estimatedMonthly
-        : provider === 'azure'
-          ? c.azure.estimatedMonthly
-          : null;
+      provider === 'gcp'   ? c.gcp.estimatedMonthly   :
+      provider === 'azure' ? c.azure.estimatedMonthly  :
+      provider === 'aws'   ? c.aws.estimatedMonthly    :
+      null;
     return targetPrice != null ? acc + (c.currentCost - targetPrice) : acc;
   }, 0);
 
