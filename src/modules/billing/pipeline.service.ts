@@ -189,7 +189,8 @@ function calculatePayback(
     return targetPrice != null ? acc + (c.currentCost - targetPrice) : acc;
   }, 0);
 
-  const migrationCost = billing.totalCost * 3;
+  const MIGRATION_MULTIPLIER = 3;
+  const migrationCost = billing.totalCost * MIGRATION_MULTIPLIER;
   const paybackMonths = monthlySaving > 0 ? Math.ceil(migrationCost / monthlySaving) : 0;
   const roi = (months: number) =>
     monthlySaving > 0
@@ -202,6 +203,11 @@ function calculatePayback(
       coveredCostPct: prices.meta.coveredCostPct,
       monthlySaving: Number(monthlySaving.toFixed(2)),
       migrationCost: Number(migrationCost.toFixed(2)),
+      migrationCostBreakdown: {
+        multiplier: MIGRATION_MULTIPLIER,
+        monthlyBase: Number(billing.totalCost.toFixed(2)),
+        rationale: `${MIGRATION_MULTIPLIER}× o custo mensal atual — estimativa conservadora para período de operação dual (infraestrutura nova + legada rodando simultaneamente) durante a migração`,
+      },
       paybackMonths,
       roi12m: roi(12),
       roi24m: roi(24),

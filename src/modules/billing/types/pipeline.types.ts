@@ -145,6 +145,11 @@ export interface PaybackResult {
     coveredCostPct: number;
     monthlySaving: number;
     migrationCost: number;
+    migrationCostBreakdown: {
+      multiplier: number;          // sempre 3
+      rationale: string;           // texto legível explicando o cálculo
+      monthlyBase: number;         // = totalCost
+    };
     paybackMonths: number;
     roi12m: number;
     roi24m: number;
