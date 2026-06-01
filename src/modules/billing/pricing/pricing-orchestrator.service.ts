@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AzurePricingService } from './azure-pricing.service';
 import { AwsPricingService, AwsPricingParams } from './aws-pricing.service';
 import { GcpPricingService } from './gcp-pricing.service';
+import { OciPricingService } from './oci-pricing.service';
 import {
   ParsedBilling,
   MappingResult,
@@ -21,6 +22,7 @@ export class PricingOrchestratorService {
     private readonly azure: AzurePricingService,
     private readonly aws: AwsPricingService,
     private readonly gcp: GcpPricingService,
+    private readonly oci: OciPricingService,
   ) {}
 
   // ─── Etapa 3: busca paralela de preços ───────────────────────────────────────
@@ -47,7 +49,7 @@ export class PricingOrchestratorService {
   ) {
     const hours = this.estimateHours(svc);
 
-    const [gcpEntry, azureEntry, awsEntry] = await Promise.all([
+    const [gcpEntry, azureEntry, awsEntry, ociEntry] = await Promise.all([
       mapping?.gcp
         ? this.gcp.getPrice(mapping.gcp, hours)
         : this.notAvailable('Sem mapeamento GCP'),
@@ -57,14 +59,10 @@ export class PricingOrchestratorService {
       mapping?.aws
         ? this.aws.getPrice(this.toAwsParams(mapping.aws), hours)
         : this.notAvailable('Sem mapeamento AWS'),
+      mapping?.oci
+        ? this.oci.getPrice(mapping.oci, hours)
+        : this.notAvailable('Sem mapeamento OCI'),
     ]);
-
-    // OCI não tem API pública — sempre retorna sem dados
-    const ociEntry: PriceEntry = {
-      price: null,
-      verified: false,
-      reason: 'API pública não disponível para OCI',
-    };
 
     return {
       service: svc.name,
@@ -76,6 +74,7 @@ export class PricingOrchestratorService {
       gcpConfidence: mapping?.gcp?.confidence ?? null,
       azureConfidence: mapping?.azure?.confidence ?? null,
       awsConfidence: mapping?.aws?.confidence ?? null,
+      ociConfidence: mapping?.oci?.confidence ?? null,
     };
   }
 
@@ -94,12 +93,13 @@ export class PricingOrchestratorService {
       aws: item.aws,
       gcpStatus: this.resolveStatus(item.gcp, item.gcpConfidence),
       azureStatus: this.resolveStatus(item.azure, item.azureConfidence),
-      ociStatus: 'no_api' as VerificationStatus,
+      ociStatus: this.resolveStatus(item.oci, item.ociConfidence),
       awsStatus: this.resolveStatus(item.aws, item.awsConfidence),
     }));
 
     const isVerified = (c: ClassifiedPrice) =>
-      c.gcpStatus === 'verified' || c.azureStatus === 'verified' || c.awsStatus === 'verified';
+      c.gcpStatus === 'verified' || c.azureStatus === 'verified' ||
+      c.awsStatus === 'verified'  || c.ociStatus === 'verified';
 
     const verifiedCost = classified
       .filter(isVerified)
@@ -109,7 +109,8 @@ export class PricingOrchestratorService {
 
     const partialServices = classified.filter(
       (c) =>
-        (c.gcpStatus === 'partial' || c.azureStatus === 'partial' || c.awsStatus === 'partial') &&
+        (c.gcpStatus === 'partial' || c.azureStatus === 'partial' ||
+         c.awsStatus === 'partial'  || c.ociStatus === 'partial') &&
         !isVerified(c),
     ).length;
 
@@ -117,7 +118,8 @@ export class PricingOrchestratorService {
       (c) =>
         c.gcpStatus === 'not_found' &&
         c.azureStatus === 'not_found' &&
-        c.awsStatus === 'not_found',
+        c.awsStatus === 'not_found' &&
+        c.ociStatus === 'not_found',
     ).length;
 
     return {

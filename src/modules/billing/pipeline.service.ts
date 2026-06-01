@@ -168,6 +168,7 @@ function calculatePayback(
       provider === 'gcp'   ? c.gcp.estimatedMonthly   :
       provider === 'azure' ? c.azure.estimatedMonthly  :
       provider === 'aws'   ? c.aws.estimatedMonthly    :
+      provider === 'oci'   ? c.oci.estimatedMonthly    :
       null;
     return targetPrice != null ? acc + (c.currentCost - targetPrice) : acc;
   }, 0);
