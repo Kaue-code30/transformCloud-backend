@@ -55,8 +55,10 @@ const AWS_REGION_NAMES: Record<string, string> = {
   'ca-central-1':   'Canada (Central)',
 };
 
-// Cache por "service/region" — carregado uma vez, reutilizado em todas as chamadas
-// Determinístico: elimina a variabilidade do streaming parcial
+// Serviços que não têm index.json na Pricing API (cobram por request/regra, não por hora)
+const UNSUPPORTED_SERVICES = new Set(['AWSWAFv2', 'AWSWAF', 'AWSShield', 'AWSCloudFront']);
+
+// Cache por "service/region" — só guarda sucesso; falhas não entram para permitir retry
 const catalogCache = new Map<string, Promise<AwsOffersFile>>();
 
 function fetchJson(url: string, timeoutMs: number): Promise<AwsOffersFile> {
@@ -65,8 +67,14 @@ function fetchJson(url: string, timeoutMs: number): Promise<AwsOffersFile> {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8').trimStart();
+        // Resposta XML significa que o serviço não existe na Pricing API
+        if (raw.startsWith('<')) {
+          reject(new Error(`Serviço não disponível na AWS Pricing API (resposta XML)`));
+          return;
+        }
         try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as AwsOffersFile);
+          resolve(JSON.parse(raw) as AwsOffersFile);
         } catch (e) {
           reject(e);
         }
@@ -83,6 +91,10 @@ export class AwsPricingService {
   private readonly logger = new Logger(AwsPricingService.name);
 
   async getPrice(params: AwsPricingParams, quantityHours: number): Promise<PriceEntry> {
+    if (UNSUPPORTED_SERVICES.has(params.service)) {
+      return { price: null, verified: false, reason: `${params.service} cobra por request/regra — sem preço por hora na Pricing API` };
+    }
+
     const regionName = AWS_REGION_NAMES[params.region];
     if (!regionName) {
       return { price: null, verified: false, reason: `Região AWS ${params.region} não mapeada` };
@@ -131,11 +143,16 @@ export class AwsPricingService {
     if (!catalogCache.has(key)) {
       const url = `${AWS_PRICING_API}/${service}/current/${region}/index.json`;
       this.logger.log(`AWS: carregando catálogo ${key}...`);
-      // Timeout de 90s — arquivos chegam a ~100MB mas o download acontece uma só vez
-      const promise = fetchJson(url, 90_000).then((data) => {
-        this.logger.log(`AWS: catálogo ${key} carregado (${Object.keys(data.products ?? {}).length} produtos)`);
-        return data;
-      });
+      const promise = fetchJson(url, 90_000)
+        .then((data) => {
+          this.logger.log(`AWS: catálogo ${key} carregado (${Object.keys(data.products ?? {}).length} produtos)`);
+          return data;
+        })
+        .catch((err) => {
+          // Não deixa a Promise rejeitada no cache — próxima chamada tentará novamente
+          catalogCache.delete(key);
+          throw err;
+        });
       catalogCache.set(key, promise);
     }
     return catalogCache.get(key)!;

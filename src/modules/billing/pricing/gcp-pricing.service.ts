@@ -161,25 +161,24 @@ const SERVICE_FALLBACK_TERMS: Record<string, string[]> = {
 
 // Retorna múltiplos termos candidatos, do mais específico ao mais genérico
 function extractSearchTerms(mapping: GcpMapping): string[] {
-  const raw = (mapping.machineType ?? mapping.tier ?? '').toLowerCase().trim();
-
-  // Sem machineType: usa termos específicos por serviço
-  if (!raw) {
-    const svcLower = mapping.service.toLowerCase();
-    for (const [svc, terms] of Object.entries(SERVICE_FALLBACK_TERMS)) {
-      if (svcLower.includes(svc)) return terms;
-    }
-    return [];
+  // 1. Termos específicos por serviço têm prioridade máxima
+  // Cloud Armor, Memorystore, Cloud Storage, etc. não usam machineType
+  const svcLower = mapping.service.toLowerCase();
+  for (const [svc, terms] of Object.entries(SERVICE_FALLBACK_TERMS)) {
+    if (svcLower.includes(svc)) return terms;
   }
 
-  // Busca direta por família conhecida
+  // 2. Para serviços com machineType: deriva termos por família
+  const raw = (mapping.machineType ?? mapping.tier ?? '').toLowerCase().trim();
+  if (!raw) return [];
+
   for (const [family, terms] of Object.entries(MACHINE_FAMILY_TERMS)) {
     if (raw.startsWith(family) || raw === family) {
       return terms;
     }
   }
 
-  // Fallback: extrai a família do prefixo e tenta variações
+  // 3. Fallback genérico por prefixo
   const family = raw.split('-')[0];
   if (family) {
     return [

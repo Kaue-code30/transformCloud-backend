@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ClaudeService } from './ai/claude.service';
 import { MappingService } from './mapping/mapping.service';
@@ -14,6 +14,8 @@ import type {
 
 @Injectable()
 export class PipelineService {
+  private readonly logger = new Logger(PipelineService.name);
+
   constructor(
     private readonly claude: ClaudeService,
     private readonly mapping: MappingService,
@@ -42,6 +44,13 @@ export class PipelineService {
           // Etapa 3+4: preços reais + classificação
           subscriber.next({ step: 'pricing', message: 'Buscando preços em tempo real...' });
           partial.prices = await this.pricing.fetchPrices(billingNormalized, partial.mappings);
+          // Log de diagnóstico — mostra preços de todos os provedores por serviço
+          for (const c of partial.prices.classified) {
+            this.logger.debug(
+              `[prices] ${c.service} | aws=${c.aws.price ?? 'null'}(${c.awsStatus}) gcp=${c.gcp.price ?? 'null'}(${c.gcpStatus}) azure=${c.azure.price ?? 'null'}(${c.azureStatus}) oci=${c.oci.price ?? 'null'}(${c.ociStatus})`,
+            );
+          }
+
           subscriber.next({
             step: 'classification',
             message: `${partial.prices.meta.verifiedServices} serviços verificados (${partial.prices.meta.coveredCostPct}% de cobertura)`,
