@@ -3,6 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OciMapping, PriceEntry } from '../types/pipeline.types';
 
 const OCI_PRICING_API = 'https://apexapps.oracle.com/pls/apex/cetools/api/v1/products/';
+const PAGE_SIZE = 1000;
+// Flex shapes cobram OCPU e memória por separado — precisamos dos dois SKUs
+const OCPU_KEYWORDS = ['ocpu', 'vcpu', 'cpu'];
+const MEM_KEYWORDS  = ['memory', 'ram', 'gb memory'];
 
 interface OciProduct {
   partNumber: string;
@@ -18,77 +22,40 @@ interface OciProduct {
 interface OciApiResponse {
   items: OciProduct[];
   hasMore?: boolean;
-  offset?: number;
-  limit?: number;
+  count?: number;
 }
-
-// OCI Flex shapes cobram separadamente OCPU e memória — precisamos de ambos os part numbers.
-// Mapa: shape → { ocpuPartNumber, memPartNumber }
-// Fonte: https://www.oracle.com/cloud/price-list/
-const OCI_SHAPE_PARTS: Record<string, { ocpu: string; mem: string }> = {
-  // Standard — AMD E4
-  'VM.Standard.E4.Flex':  { ocpu: 'B88317', mem: 'B88318' },
-  'BM.Standard.E4.128':   { ocpu: 'B88317', mem: 'B88318' },
-  // Standard — AMD E3
-  'VM.Standard.E3.Flex':  { ocpu: 'B88265', mem: 'B88266' },
-  // Standard — Intel X9
-  'VM.Standard3.Flex':    { ocpu: 'B88571', mem: 'B88572' },
-  // Optimized — Intel X9
-  'VM.Optimized3.Flex':   { ocpu: 'B88573', mem: 'B88574' },
-  // Standard A1 — Ampere (ARM)
-  'VM.Standard.A1.Flex':  { ocpu: 'B88514', mem: 'B88515' },
-  // GPU A10
-  'VM.GPU.A10.1':         { ocpu: 'B90564', mem: 'B90564' },
-  // MySQL Database Service — OCPU based (single part covers compute)
-  'MySQL.VM.Standard.E3.1.8GB':   { ocpu: 'B88366', mem: 'B88366' },
-  'MySQL.VM.Standard.E3.2.16GB':  { ocpu: 'B88367', mem: 'B88367' },
-  'MySQL.VM.Standard.E3.4.32GB':  { ocpu: 'B88368', mem: 'B88368' },
-  'MySQL.VM.Standard.E3.8.64GB':  { ocpu: 'B88369', mem: 'B88369' },
-  'MySQL.VM.Standard.E3.4.64GB':  { ocpu: 'B88370', mem: 'B88370' },
-  'MySQL.VM.Standard.E3.8.128GB': { ocpu: 'B88371', mem: 'B88371' },
-  'MySQL.VM.Standard.E3.16.256GB':{ ocpu: 'B88372', mem: 'B88372' },
-  // Cache with Redis
-  'BM.Standard.E2.64':    { ocpu: 'B89071', mem: 'B89072' },
-};
-
-// Serviços MySQL/Cache: têm um único partNumber que cobre a instância completa (não Flex)
-const FIXED_SHAPE_PARTS = new Set([
-  'MySQL.VM.Standard.E3.1.8GB',
-  'MySQL.VM.Standard.E3.2.16GB',
-  'MySQL.VM.Standard.E3.4.32GB',
-  'MySQL.VM.Standard.E3.8.64GB',
-  'MySQL.VM.Standard.E3.4.64GB',
-  'MySQL.VM.Standard.E3.8.128GB',
-  'MySQL.VM.Standard.E3.16.256GB',
-  'BM.Standard.E2.64',
-]);
 
 function httpsGet(url: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }, (res) => {
-      let body = '';
-      res.on('data', (chunk: Buffer) => (body += chunk.toString()));
-      res.on('end', () => resolve(body));
-      res.on('error', reject);
-    });
+    const req = https.get(
+      url,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        res.on('error', reject);
+      },
+    );
     req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('OCI API timeout')); });
     req.on('error', reject);
   });
 }
 
-function extractUsdPrice(product: OciProduct): number | null {
+function usdPayg(product: OciProduct): number | null {
   const usd = product.currencyCodeLocalizations.find((c) => c.currencyCode === 'USD');
   if (!usd) return null;
   const payg = usd.prices.find((p) => p.model === 'PAY_AS_YOU_GO');
-  return payg ? payg.value : null;
+  return payg?.value ?? null;
 }
 
 @Injectable()
 export class OciPricingService {
   private readonly logger = new Logger(OciPricingService.name);
 
-  // Cache em memória por partNumber para evitar chamadas repetidas na mesma requisição
-  private readonly cache = new Map<string, OciProduct | null>();
+  // Catálogo completo carregado uma vez por processo
+  private catalog: OciProduct[] | null = null;
+  private catalogLoading: Promise<OciProduct[]> | null = null;
 
   async getPrice(mapping: OciMapping, quantityHours: number): Promise<PriceEntry> {
     const shape = mapping.shape;
@@ -96,92 +63,195 @@ export class OciPricingService {
       return { price: null, verified: false, reason: 'OCI shape não informado' };
     }
 
-    const parts = OCI_SHAPE_PARTS[shape];
-    if (!parts) {
-      return { price: null, verified: false, reason: `Shape ${shape} não mapeado para part numbers OCI` };
-    }
-
     try {
-      const isFixed = FIXED_SHAPE_PARTS.has(shape);
+      const catalog = await this.loadCatalog();
 
-      if (isFixed) {
-        // Um único part number cobre a instância completa (preço por hora)
-        const product = await this.fetchProduct(parts.ocpu);
-        if (!product) {
-          return { price: null, verified: false, reason: `Part number ${parts.ocpu} não encontrado na OCI API` };
-        }
+      const isFlexShape = shape.includes('Flex') || shape.includes('flex');
 
-        const hourlyPrice = extractUsdPrice(product);
-        if (hourlyPrice === null) {
-          return { price: null, verified: false, reason: 'Preço USD não encontrado no produto OCI' };
-        }
-
-        return {
-          price: hourlyPrice,
-          unit: 'hora',
-          estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
-          source: 'OCI Pricing API',
-          verified: true,
-        };
+      if (isFlexShape) {
+        return this.priceFlexShape(catalog, shape, mapping, quantityHours);
+      } else {
+        return this.priceFixedShape(catalog, shape, quantityHours);
       }
-
-      // Flex shape: preço = (ocpuPrice × ocpu) + (memPrice × memGb)  — por hora
-      const ocpu   = mapping.ocpu   ?? 1;
-      const memGb  = mapping.memoryGb ?? 8;
-
-      const [ocpuProduct, memProduct] = await Promise.all([
-        this.fetchProduct(parts.ocpu),
-        parts.ocpu === parts.mem ? Promise.resolve(null) : this.fetchProduct(parts.mem),
-      ]);
-
-      if (!ocpuProduct) {
-        return { price: null, verified: false, reason: `Part number OCPU ${parts.ocpu} não encontrado` };
-      }
-
-      const ocpuUnitPrice = extractUsdPrice(ocpuProduct);
-      if (ocpuUnitPrice === null) {
-        return { price: null, verified: false, reason: 'Preço OCPU USD não disponível' };
-      }
-
-      // Se os dois part numbers forem iguais (edge case), usa o mesmo produto para memória
-      const resolvedMemProduct = memProduct ?? ocpuProduct;
-      const memUnitPrice = extractUsdPrice(resolvedMemProduct);
-      if (memUnitPrice === null) {
-        return { price: null, verified: false, reason: 'Preço Memory USD não disponível' };
-      }
-
-      const hourlyPrice = (ocpuUnitPrice * ocpu) + (memUnitPrice * memGb);
-
-      return {
-        price: Number(hourlyPrice.toFixed(6)),
-        unit: 'hora',
-        estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
-        source: 'OCI Pricing API',
-        verified: true,
-      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Erro OCI Pricing API: ${msg}`);
-      return { price: null, verified: false, reason: `Erro na requisição OCI: ${msg}` };
+      this.logger.error(`OCI pricing error para ${shape}: ${msg}`);
+      return { price: null, verified: false, reason: `Erro OCI: ${msg}` };
     }
   }
 
-  private async fetchProduct(partNumber: string): Promise<OciProduct | null> {
-    if (this.cache.has(partNumber)) {
-      return this.cache.get(partNumber) ?? null;
+  // ─── Flex shapes: (ocpu_price × ocpu) + (mem_price × memGb) ─────────────
+
+  private priceFlexShape(
+    catalog: OciProduct[],
+    shape: string,
+    mapping: OciMapping,
+    quantityHours: number,
+  ): PriceEntry {
+    // Extrai a família da shape: "VM.Standard.E4.Flex" → "E4", "VM.Standard.A1.Flex" → "A1"
+    const family = this.extractShapeFamily(shape);
+    if (!family) {
+      return { price: null, verified: false, reason: `Família de shape não reconhecida: ${shape}` };
     }
 
-    const url = `${OCI_PRICING_API}?partNumber=${encodeURIComponent(partNumber)}`;
-    const body = await httpsGet(url, 10000);
-    const data = JSON.parse(body) as OciApiResponse;
+    const ocpuProduct = this.findFlexProduct(catalog, family, 'ocpu');
+    const memProduct  = this.findFlexProduct(catalog, family, 'memory');
 
-    const product = data.items?.[0] ?? null;
-    this.cache.set(partNumber, product);
+    if (!ocpuProduct) {
+      this.logger.warn(`OCI: SKU de OCPU não encontrado para família ${family}`);
+      return { price: null, verified: false, reason: `SKU OCPU não encontrado para ${family}` };
+    }
+    if (!memProduct) {
+      this.logger.warn(`OCI: SKU de memória não encontrado para família ${family}`);
+      return { price: null, verified: false, reason: `SKU memória não encontrado para ${family}` };
+    }
+
+    const ocpuUnitPrice = usdPayg(ocpuProduct);
+    const memUnitPrice  = usdPayg(memProduct);
+
+    if (ocpuUnitPrice === null || memUnitPrice === null) {
+      return { price: null, verified: false, reason: 'Preço USD não disponível nos SKUs OCI' };
+    }
+
+    const ocpu  = mapping.ocpu    ?? 1;
+    const memGb = mapping.memoryGb ?? 8;
+    const hourlyPrice = (ocpuUnitPrice * ocpu) + (memUnitPrice * memGb);
+
+    this.logger.debug(
+      `OCI Flex ${shape}: ocpu=${ocpu}×$${ocpuUnitPrice} + mem=${memGb}GB×$${memUnitPrice} = $${hourlyPrice.toFixed(4)}/h`,
+    );
+
+    return {
+      price: Number(hourlyPrice.toFixed(6)),
+      unit: 'hora',
+      estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
+      source: 'OCI Pricing API',
+      verified: true,
+    };
+  }
+
+  // ─── Fixed shapes: MySQL, Redis Cache — um único SKU por hora ────────────
+
+  private priceFixedShape(
+    catalog: OciProduct[],
+    shape: string,
+    quantityHours: number,
+  ): PriceEntry {
+    // shape ex: "MySQL.VM.Standard.E3.2.16GB"
+    // Busca por serviceCategory + especificação (ex: "2 OCPU" / "16 GB")
+    const product = this.findFixedProduct(catalog, shape);
 
     if (!product) {
-      this.logger.warn(`OCI: partNumber ${partNumber} não retornou item`);
+      this.logger.warn(`OCI: produto não encontrado para shape ${shape}`);
+      return { price: null, verified: false, reason: `Shape ${shape} não encontrado no catálogo OCI` };
     }
 
-    return product;
+    const hourlyPrice = usdPayg(product);
+    if (hourlyPrice === null) {
+      return { price: null, verified: false, reason: 'Preço USD não disponível' };
+    }
+
+    this.logger.debug(`OCI Fixed ${shape}: "${product.displayName}" $${hourlyPrice}/h`);
+
+    return {
+      price: hourlyPrice,
+      unit: 'hora',
+      estimatedMonthly: Number((hourlyPrice * quantityHours).toFixed(2)),
+      source: 'OCI Pricing API',
+      verified: true,
+    };
+  }
+
+  // ─── Busca no catálogo ────────────────────────────────────────────────────
+
+  private extractShapeFamily(shape: string): string | null {
+    // VM.Standard.E4.Flex → E4
+    // VM.Standard.A1.Flex → A1
+    // VM.Optimized3.Flex  → Optimized3
+    // VM.Standard3.Flex   → Standard3
+    const m = shape.match(/(?:Standard|Optimized)\.?([A-Z0-9]+)\.Flex/i);
+    return m ? m[1].toUpperCase() : null;
+  }
+
+  private findFlexProduct(
+    catalog: OciProduct[],
+    family: string,
+    type: 'ocpu' | 'memory',
+  ): OciProduct | null {
+    const familyLower = family.toLowerCase();
+    const keywords = type === 'ocpu' ? OCPU_KEYWORDS : MEM_KEYWORDS;
+
+    return catalog.find((p) => {
+      const name = p.displayName.toLowerCase();
+      const metric = p.metricName.toLowerCase();
+      // Deve mencionar a família
+      if (!name.includes(familyLower) && !name.includes(`e${family.slice(-1)}`)) return false;
+      // Deve mencionar OCPU ou Memory conforme o tipo
+      const combined = `${name} ${metric}`;
+      return keywords.some((kw) => combined.includes(kw));
+    }) ?? null;
+  }
+
+  private findFixedProduct(catalog: OciProduct[], shape: string): OciProduct | null {
+    // shape: "MySQL.VM.Standard.E3.2.16GB"
+    // Extrai o número de OCPUs e GB de memória do shape name
+    const m = shape.match(/\.(\d+)\.(\d+)GB$/i);
+    if (!m) return null;
+
+    const ocpu = m[1];   // "2"
+    const mem  = m[2];   // "16"
+
+    // Detecta o serviço (MySQL vs Redis)
+    const isMySQL = shape.toLowerCase().includes('mysql');
+    const isRedis = shape.toLowerCase().includes('redis') || shape.toLowerCase().includes('cache');
+
+    return catalog.find((p) => {
+      const name = p.displayName.toLowerCase();
+      const cat  = p.serviceCategory.toLowerCase();
+
+      if (isMySQL && !cat.includes('mysql') && !name.includes('mysql')) return false;
+      if (isRedis && !cat.includes('redis') && !name.includes('redis') && !cat.includes('cache')) return false;
+
+      // Deve conter referência à quantidade de OCPUs e memória
+      return (name.includes(`${ocpu} ocpu`) || name.includes(`${ocpu}ocpu`)) &&
+             (name.includes(`${mem}gb`) || name.includes(`${mem} gb`));
+    }) ?? null;
+  }
+
+  // ─── Carregamento do catálogo completo ───────────────────────────────────
+
+  private loadCatalog(): Promise<OciProduct[]> {
+    if (this.catalog) return Promise.resolve(this.catalog);
+    if (this.catalogLoading) return this.catalogLoading;
+
+    this.catalogLoading = (async () => {
+      const all: OciProduct[] = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const url = `${OCI_PRICING_API}?limit=${PAGE_SIZE}&offset=${offset}`;
+        const body = await httpsGet(url, 30_000);
+        const data = JSON.parse(body) as OciApiResponse;
+
+        if (!data.items?.length) break;
+        all.push(...data.items);
+
+        // hasMore presente na resposta ou inferido pelo count
+        hasMore = data.hasMore === true || data.items.length === PAGE_SIZE;
+        offset += data.items.length;
+
+        this.logger.log(`OCI catálogo: ${all.length} produtos carregados`);
+
+        // Limite de segurança: máximo 20k produtos (~20 páginas)
+        if (offset >= 20_000) break;
+      }
+
+      this.catalog = all;
+      this.logger.log(`OCI catálogo completo: ${all.length} produtos`);
+      return all;
+    })();
+
+    return this.catalogLoading;
   }
 }

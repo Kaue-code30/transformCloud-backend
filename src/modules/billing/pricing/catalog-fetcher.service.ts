@@ -21,11 +21,6 @@ interface AzureRetailPrice {
   serviceName: string;
 }
 
-interface AzureApiResponse {
-  Items: AzureRetailPrice[];
-  NextPageLink?: string;
-}
-
 const AZURE_PRICES_API = 'https://prices.azure.com/api/retail/prices';
 
 function httpsGet(url: string, timeoutMs: number): Promise<string> {
@@ -111,12 +106,14 @@ export class CatalogFetcherService {
     const filter = encodeURIComponent(
       `serviceName eq '${serviceName}' and armRegionName eq '${region}' and priceType eq 'Consumption'`,
     );
-    const url = `${AZURE_PRICES_API}?$filter=${filter}&$top=100`;
+    const url = `${AZURE_PRICES_API}?$filter=${filter}&$top=200`;
 
-    const body = await httpsGet(url, 8000);
-    const data = JSON.parse(body) as AzureApiResponse;
+    const body = await httpsGet(url, 10000);
+    // A Azure Retail Prices API retorna Items com I maiúsculo
+    const data = JSON.parse(body) as { Items?: AzureRetailPrice[]; items?: AzureRetailPrice[] };
 
-    return (data.Items ?? [])
+    const items = data.Items ?? data.items ?? [];
+    return items
       .map((i) => i.armSkuName)
       .filter((s) => s && s.trim().length > 0);
   }

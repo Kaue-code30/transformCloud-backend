@@ -149,10 +149,28 @@ function resolveServiceId(rawName: string): string | null {
   return null;
 }
 
+// Termos de busca por nome de serviço GCP (quando não há machineType)
+const SERVICE_FALLBACK_TERMS: Record<string, string[]> = {
+  'cloud armor':   ['cloud armor policy', 'cloud armor'],
+  'memorystore':   ['memorystore for redis', 'memorystore redis', 'memorystore'],
+  'cloud storage': ['standard storage', 'multi-regional storage', 'regional storage'],
+  'bigquery':      ['bigquery analysis', 'bigquery storage', 'bigquery'],
+  'cloud run':     ['cloud run requests', 'cloud run cpu', 'cloud run'],
+  'alloydb':       ['alloydb for postgresql', 'alloydb'],
+};
+
 // Retorna múltiplos termos candidatos, do mais específico ao mais genérico
 function extractSearchTerms(mapping: GcpMapping): string[] {
   const raw = (mapping.machineType ?? mapping.tier ?? '').toLowerCase().trim();
-  if (!raw) return [];
+
+  // Sem machineType: usa termos específicos por serviço
+  if (!raw) {
+    const svcLower = mapping.service.toLowerCase();
+    for (const [svc, terms] of Object.entries(SERVICE_FALLBACK_TERMS)) {
+      if (svcLower.includes(svc)) return terms;
+    }
+    return [];
+  }
 
   // Busca direta por família conhecida
   for (const [family, terms] of Object.entries(MACHINE_FAMILY_TERMS)) {
