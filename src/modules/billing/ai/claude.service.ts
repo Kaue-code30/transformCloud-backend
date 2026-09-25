@@ -3,68 +3,64 @@ import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import type {
   ParsedBilling,
-  MappingResult,
   ClassificationResult,
   RecommendationResult,
+  CloudProvider,
+  ClassifiedPrice,
 } from '../types/pipeline.types';
 
 @Injectable()
 export class ClaudeService {
   private readonly logger = new Logger(ClaudeService.name);
   private readonly client: Anthropic;
+  private readonly enabled: boolean;
   private readonly model = 'claude-opus-4-7';
 
   // System prompt estável — cacheado entre requisições (prompt caching)
   private readonly systemPrompt = `Você é um especialista em migração de infraestrutura cloud.
-Seu papel é analisar bills de provedores cloud (AWS, GCP, Azure, OCI) e fornecer:
-1. Mapeamento preciso de serviços entre provedores
-2. Recomendações estratégicas de migração com justificativas técnicas e financeiras
+Você recebe uma decisão calculada por código a partir de um catálogo versionado.
+Seu papel é somente explicar a decisão, seus riscos e limitações de forma clara.
+Não altere o provedor escolhido, preços, SKUs, regiões, cobertura ou cálculos recebidos.
 
 Responda SEMPRE em JSON válido conforme o schema solicitado. Sem texto extra fora do JSON.`;
 
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
-    if (!apiKey || apiKey.includes('COLOQUE_SUA_CHAVE')) {
-      this.logger.warn('ANTHROPIC_API_KEY não configurada — etapas de IA retornarão erro.');
+    this.enabled = Boolean(apiKey && !apiKey.includes('COLOQUE_SUA_CHAVE'));
+    if (!this.enabled) {
+      this.logger.warn('ANTHROPIC_API_KEY não configurada — a recomendação usará texto determinístico.');
     }
     this.client = new Anthropic({ apiKey: apiKey ?? '' });
   }
 
-  // ─── Etapa 2: Mapeamento de serviços ─────────────────────────────────────
-
-  async mapServices(billing: ParsedBilling): Promise<MappingResult> {
-    const prompt = buildMappingPrompt(billing);
-
-    const raw = await this.ask(prompt, 8192);
-    if (!raw) return { mappings: [] };
-
-    const parsed = safeParseJson<MappingResult>(raw);
-    if (!parsed) {
-      this.logger.error('Resposta de mapeamento não é JSON válido');
-      return { mappings: [] };
-    }
-
-    return parsed;
-  }
-
-  // ─── Etapa 5: Recomendação ────────────────────────────────────────────────
+  // ─── Etapa 5: redação da recomendação calculada ───────────────────────────
 
   async generateRecommendation(
     billing: ParsedBilling,
     prices: ClassificationResult,
   ): Promise<RecommendationResult> {
-    const prompt = buildRecommendationPrompt(billing, prices);
+    const decision = calculateRecommendation(billing, prices);
+    if (!this.enabled) return decision;
+    const prompt = buildRecommendationPrompt(billing, prices, decision);
 
     const raw = await this.ask(prompt, 2048);
-    if (!raw) return fallbackRecommendation();
+    if (!raw) return decision;
 
     const parsed = safeParseJson<RecommendationResult>(raw);
-    if (!parsed) {
+    if (!parsed || !isRecommendationShape(parsed)) {
       this.logger.error('Resposta de recomendação não é JSON válido');
-      return fallbackRecommendation();
+      return decision;
     }
 
-    return parsed;
+    // A IA pode redigir, mas não pode modificar a decisão calculada.
+    return {
+      ...parsed,
+      recommendation: {
+        ...parsed.recommendation,
+        provider: decision.recommendation.provider,
+        basedOnVerified: decision.recommendation.basedOnVerified,
+      },
+    };
   }
 
   // ─── Interno ──────────────────────────────────────────────────────────────
@@ -114,105 +110,31 @@ function safeParseJson<T>(text: string | null | undefined): T | null {
   }
 }
 
-function buildMappingPrompt(billing: ParsedBilling): string {
-  const services = (billing.topServices ?? [])
-    .map((s) => `- ${s.name ?? '?'} | specs: ${s.specs ?? '-'} | custo: ${s.cost ?? 0} | qtd: ${s.quantity ?? '-'}`)
-    .join('\n');
-
-  const regionConstraint = billing.targetRegion
-    ? `\nRESTRIÇÃO DE REGIÃO: O cliente EXIGE que os serviços destino estejam na região "${billing.targetRegion}" ou equivalente próximo. Use apenas regiões dessa localidade geográfica para gcp.region e azure.region.`
-    : '';
-
-  // Referência de regiões equivalentes para o Claude usar
-  const regionReference = `
-REGIÕES EQUIVALENTES (use como referência para escolher gcp.region e azure.region):
-- us-east-1 (AWS N. Virginia)  → us-east4 (GCP)           → eastus (Azure)
-- us-east-2 (AWS Ohio)         → us-east1 (GCP)           → eastus2 (Azure)
-- us-west-2 (AWS Oregon)       → us-west1 (GCP)           → westus2 (Azure)
-- sa-east-1 (AWS São Paulo)    → southamerica-east1 (GCP) → brazilsouth (Azure)
-- eu-west-1 (AWS Irlanda)      → europe-west1 (GCP)       → westeurope (Azure)
-- eu-central-1 (AWS Frankfurt) → europe-west3 (GCP)       → germanywestcentral (Azure)
-- ap-southeast-1 (AWS Singapura)→ asia-southeast1 (GCP)  → southeastasia (Azure)
-- ap-northeast-1 (AWS Tóquio)  → asia-northeast1 (GCP)   → japaneast (Azure)`;
-
-  return `Mapeie os seguintes serviços ${billing.provider} para equivalentes em GCP, Azure e OCI.
-
-Bill de origem:
-- Provedor: ${billing.provider}
-- Período: ${billing.period.start} a ${billing.period.end}
-- Custo total: ${billing.currency} ${billing.totalCost}
-${regionConstraint}
-Serviços a mapear:
-${services}
-${regionReference}
-
-REGRAS OBRIGATÓRIAS para os campos:
-- gcp.service: APENAS um destes valores exatos: "Compute Engine", "Cloud SQL", "Cloud Storage", "Cloud Run", "BigQuery", "Memorystore", "Cloud Armor"
-- gcp.machineType: somente o tipo de máquina simples (ex: "n2-standard-2", "e2-medium", "db-custom-2-4096"). SEM texto adicional.
-- gcp.region: somente o identificador de região GCP (ex: "us-east4", "southamerica-east1"). SEM texto adicional.
-- azure.service: APENAS um destes valores exatos: "Virtual Machines", "Azure Database for PostgreSQL Flexible Server", "Azure Database for MySQL Flexible Server", "Azure Blob Storage", "Azure Cache for Redis", "Azure Application Gateway"
-- azure.skuName e azure.sku: somente o SKU simples (ex: "Standard_D2s_v3"). SEM texto adicional.
-- azure.region: somente o identificador de região Azure (ex: "eastus", "brazilsouth"). SEM texto adicional.
-- aws.service: APENAS um destes valores exatos: "AmazonEC2", "AmazonRDS", "AmazonS3", "AWSLambda", "AmazonElastiCache", "AWSWAFv2"
-- aws.instanceType: somente o tipo de instância simples (ex: "m7g.2xlarge", "db.r6g.2xlarge"). SEM texto adicional.
-- aws.region: somente o identificador de região AWS (ex: "us-east-1", "sa-east-1"). SEM texto adicional.
-- aws.operatingSystem: "Linux" ou "Windows" (somente para EC2).
-
-Retorne JSON no formato exato:
-{
-  "mappings": [
-    {
-      "original": "<nome original>",
-      "gcp": {
-        "service": "Compute Engine",
-        "machineType": "n2-standard-2",
-        "region": "us-east4",
-        "confidence": "high|medium|low"
-      },
-      "azure": {
-        "service": "Virtual Machines",
-        "skuName": "Standard_D2s_v3",
-        "sku": "Standard_D2s_v3",
-        "region": "eastus",
-        "confidence": "high|medium|low"
-      },
-      "aws": {
-        "service": "AmazonEC2",
-        "instanceType": "m7g.2xlarge",
-        "region": "us-east-1",
-        "operatingSystem": "Linux",
-        "confidence": "high|medium|low"
-      },
-      "oci": {
-        "service": "Compute",
-        "shape": "VM.Standard.E4.Flex",
-        "ocpu": 2,
-        "memoryGb": 8,
-        "confidence": "high|medium|low"
-      }
-    }
-  ]
-}`;
-}
-
 function buildRecommendationPrompt(
   billing: ParsedBilling,
   prices: ClassificationResult,
+  decision: RecommendationResult,
 ): string {
   const summary = prices.classified
     .map(
       (c) =>
-        `- ${c.service}: atual ${billing.currency}${c.currentCost} | AWS ${c.aws.price ?? 'N/D'} | GCP ${c.gcp.price ?? 'N/D'} | Azure ${c.azure.price ?? 'N/D'}`,
+        `- ${c.service}: atual ${billing.currency} ${c.currentCost} | AWS ${formatMonthly(c.aws)} (${c.awsStatus}) | GCP ${formatMonthly(c.gcp)} (${c.gcpStatus}) | Azure ${formatMonthly(c.azure)} (${c.azureStatus}) | OCI ${formatMonthly(c.oci)} (${c.ociStatus})`,
     )
     .join('\n');
 
-  return `Com base nos dados abaixo, recomende o melhor provedor destino para migração.
+  return `Explique a decisão de migração já calculada abaixo.
+Não escolha outro provedor e não altere valores.
 
 Bill atual (${billing.provider}):
 - Custo total: ${billing.currency} ${billing.totalCost}/mês
 - Qualidade dos dados: ${billing.dataQuality}
 
-Comparativo de preços verificados:
+DECISÃO CALCULADA PELO SISTEMA:
+- Provedor: ${decision.recommendation.provider}
+- Baseada em cobertura suficiente: ${decision.recommendation.basedOnVerified}
+- Justificativa calculada: ${decision.recommendation.cfa_justification}
+
+Comparativo mensal do catálogo:
 ${summary}
 
 Cobertura verificada: ${prices.meta.coveredCostPct}% do custo total
@@ -221,8 +143,8 @@ Serviços verificados: ${prices.meta.verifiedServices}/${prices.meta.analyzedSer
 Retorne JSON no formato exato:
 {
   "recommendation": {
-    "provider": "GCP|AZURE|OCI|AWS",
-    "basedOnVerified": true,
+    "provider": "${decision.recommendation.provider}",
+    "basedOnVerified": ${decision.recommendation.basedOnVerified},
     "migrationComplexity": "low|medium|high",
     "reasons": ["<razão 1>", "<razão 2>"],
     "topServices": ["<serviço 1>", "<serviço 2>"],
@@ -233,17 +155,116 @@ Retorne JSON no formato exato:
 }`;
 }
 
-function fallbackRecommendation(): RecommendationResult {
+function calculateRecommendation(
+  billing: ParsedBilling,
+  prices: ClassificationResult,
+): RecommendationResult {
+  const providers = (['AWS', 'GCP', 'AZURE', 'OCI'] as CloudProvider[]).filter(
+    (provider) => provider !== billing.provider,
+  );
+  const candidates = providers
+    .map((provider) => calculateProviderCandidate(billing, prices.classified, provider))
+    .filter((candidate): candidate is ProviderCandidate => candidate !== null)
+    .sort((a, b) => a.projectedTotal - b.projectedTotal || b.coveredCostPct - a.coveredCostPct);
+  const best = candidates[0];
+
+  if (!best || best.monthlySaving <= 0) {
+    return {
+      recommendation: {
+        provider: billing.provider,
+        basedOnVerified: false,
+        migrationComplexity: 'low',
+        reasons: ['O catálogo não demonstrou economia verificável suficiente para recomendar migração'],
+        topServices: [],
+        cfa_justification: 'Manter o provedor atual até que exista cobertura de preço suficiente e economia positiva.',
+      },
+      insights: ['Itens sem equivalência não foram estimados nem preenchidos por IA.'],
+      summary: 'Nenhuma migração é recomendada com os dados atualmente verificados.',
+    };
+  }
+
+  const basedOnVerified = best.coveredCostPct >= 70;
   return {
     recommendation: {
-      provider: 'GCP',
-      basedOnVerified: false,
+      provider: best.provider,
+      basedOnVerified,
       migrationComplexity: 'medium',
-      reasons: ['Dados insuficientes para recomendação precisa'],
-      topServices: [],
-      cfa_justification: 'Análise indisponível — verifique a chave da API Anthropic.',
+      reasons: [
+        `Economia mensal verificada de ${billing.currency} ${best.monthlySaving.toFixed(2)}`,
+        `Cobertura de ${best.coveredCostPct}% do custo total`,
+      ],
+      topServices: best.services,
+      cfa_justification:
+        `Custo projetado de ${billing.currency} ${best.projectedTotal.toFixed(2)}/mês, ` +
+        `mantendo sem alteração os itens ainda não cobertos pelo catálogo.`,
     },
-    insights: [],
-    summary: 'Não foi possível gerar recomendação.',
+    insights: basedOnVerified
+      ? ['A decisão usa apenas ofertas e preços vigentes no catálogo local.']
+      : ['A cobertura é inferior a 70%; valide os itens sem equivalência antes da decisão final.'],
+    summary: `O ranking determinístico indica ${best.provider} com ${best.coveredCostPct}% de cobertura.`,
   };
+}
+
+interface ProviderCandidate {
+  provider: CloudProvider;
+  coveredCostPct: number;
+  monthlySaving: number;
+  projectedTotal: number;
+  services: string[];
+}
+
+function calculateProviderCandidate(
+  billing: ParsedBilling,
+  prices: ClassifiedPrice[],
+  provider: CloudProvider,
+): ProviderCandidate | null {
+  const covered = prices.filter((price) => {
+    const snapshot = providerSnapshot(price, provider);
+    return (
+      snapshot.status === 'verified' &&
+      snapshot.entry.estimatedMonthly != null &&
+      (!snapshot.entry.currency || snapshot.entry.currency === billing.currency)
+    );
+  });
+  if (!covered.length) return null;
+
+  const currentCovered = covered.reduce((sum, price) => sum + price.currentCost, 0);
+  const targetCovered = covered.reduce(
+    (sum, price) => sum + (providerSnapshot(price, provider).entry.estimatedMonthly ?? 0),
+    0,
+  );
+  const monthlySaving = currentCovered - targetCovered;
+  return {
+    provider,
+    coveredCostPct:
+      billing.totalCost > 0
+        ? Math.min(100, Math.round((currentCovered / billing.totalCost) * 100))
+        : 0,
+    monthlySaving,
+    projectedTotal: billing.totalCost - monthlySaving,
+    services: covered.map((price) => price.service),
+  };
+}
+
+function providerSnapshot(price: ClassifiedPrice, provider: CloudProvider) {
+  if (provider === 'AWS') return { entry: price.aws, status: price.awsStatus };
+  if (provider === 'GCP') return { entry: price.gcp, status: price.gcpStatus };
+  if (provider === 'AZURE') return { entry: price.azure, status: price.azureStatus };
+  return { entry: price.oci, status: price.ociStatus };
+}
+
+function formatMonthly(entry: ClassifiedPrice['aws']): string {
+  return entry.estimatedMonthly == null
+    ? 'N/D'
+    : `${entry.currency ?? '?'} ${entry.estimatedMonthly}`;
+}
+
+function isRecommendationShape(value: RecommendationResult): boolean {
+  return Boolean(
+    value?.recommendation &&
+      Array.isArray(value.recommendation.reasons) &&
+      Array.isArray(value.recommendation.topServices) &&
+      Array.isArray(value.insights) &&
+      typeof value.summary === 'string',
+  );
 }

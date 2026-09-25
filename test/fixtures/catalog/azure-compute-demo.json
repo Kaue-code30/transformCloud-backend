@@ -1,0 +1,59 @@
+{
+  "provider": "AZURE",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "Microsoft.Compute/virtualMachines",
+      "name": "Virtual Machines",
+      "resourceKind": "COMPUTE_VM"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:AZURE:Microsoft.Compute/virtualMachines:brazilsouth:Linux:Standard_D8ps_v5",
+      "serviceNativeCode": "Microsoft.Compute/virtualMachines",
+      "nativeProductId": "azure-product-standard-d8ps-v5",
+      "nativeSkuName": "Standard_D8ps_v5",
+      "displayName": "Azure Standard_D8ps_v5 (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "family": "Dpsv5",
+      "generation": "5",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:AZURE:METER:Standard_D8ps_v5:brazilsouth",
+      "serviceNativeCode": "Microsoft.Compute/virtualMachines",
+      "nativeSkuId": "azure-sku-standard-d8ps-v5",
+      "nativeMeterId": "azure-meter-standard-d8ps-v5",
+      "name": "Azure VM instance hour (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true },
+      "tiers": [
+        { "startQuantity": 0, "unitPrice": 0.85 }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:AZURE:Microsoft.Compute/virtualMachines:brazilsouth:Linux:Standard_D8ps_v5",
+      "meterSourceKey": "TEST:AZURE:METER:Standard_D8ps_v5:brazilsouth",
+      "quantity": 1
+    }
+  ]
+}

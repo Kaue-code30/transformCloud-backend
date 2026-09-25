@@ -4,11 +4,42 @@ export type CloudProvider = 'AWS' | 'GCP' | 'AZURE' | 'OCI';
 export type DataQuality = 'good' | 'partial' | 'poor';
 
 export interface TopService {
+  sourceLineItemKey?: string;
   name: string;
   specs: string;
   cost: number;
   pct: number;
   quantity: string;
+  /** Identificadores nativos preservados pelo parser, quando disponíveis. */
+  nativeSkuName?: string;
+  nativeProductId?: string;
+  region?: string;
+  operatingSystem?: string;
+  architecture?: string;
+  vcpu?: number;
+  memoryGiB?: number;
+  usageQuantity?: number;
+  usageUnit?: string;
+}
+
+export interface BillingLineItem {
+  sourceKey?: string;
+  provider: CloudProvider;
+  serviceCode: string;
+  serviceName?: string;
+  skuId?: string;
+  meterId?: string;
+  nativeSkuName?: string;
+  nativeProductId?: string;
+  usageType?: string;
+  operation?: string;
+  region: string;
+  resourceId?: string;
+  quantity: number;
+  unit: string;
+  cost: number;
+  currency: string;
+  attributes?: Record<string, string | number | boolean>;
 }
 
 export interface ParsedBilling {
@@ -18,6 +49,8 @@ export interface ParsedBilling {
   totalCost: number;
   dataQuality: DataQuality;
   topServices: TopService[];
+  /** Linhas nativas do billing. topServices continua aceito durante a migração. */
+  lineItems?: BillingLineItem[];
   /**
    * Restrição geográfica do cliente (opcional).
    * Ex: "Brasil", "América do Norte", "Europa", "us-east-1", "southamerica-east1"
@@ -26,11 +59,23 @@ export interface ParsedBilling {
   targetRegion?: string;
 }
 
-// ─── Etapa 2: Mapeamento (Claude) ─────────────────────────────────────────────
+// ─── Etapa 2: Mapeamento determinístico pelo catálogo ─────────────────────────
 
 export type Confidence = 'high' | 'medium' | 'low';
+export type MappingMatchType =
+  | 'manual_override'
+  | 'exact_capacity'
+  | 'capacity_match'
+  | 'resource_kind_match';
 
-export interface GcpMapping {
+export interface MappingMetadata {
+  catalogOfferingId: string;
+  matchType: MappingMatchType;
+  score: number;
+  evidence: string[];
+}
+
+export interface GcpMapping extends MappingMetadata {
   service: string;
   machineType?: string;
   tier?: string;
@@ -39,7 +84,7 @@ export interface GcpMapping {
   confidence: Confidence;
 }
 
-export interface AzureMapping {
+export interface AzureMapping extends MappingMetadata {
   service: string;
   skuName?: string;
   sku?: string;
@@ -47,7 +92,7 @@ export interface AzureMapping {
   confidence: Confidence;
 }
 
-export interface OciMapping {
+export interface OciMapping extends MappingMetadata {
   service: string;
   shape?: string;
   ocpu?: number;
@@ -55,7 +100,7 @@ export interface OciMapping {
   confidence: Confidence;
 }
 
-export interface AwsMapping {
+export interface AwsMapping extends MappingMetadata {
   service: string;
   instanceType?: string;
   region?: string;
@@ -74,6 +119,7 @@ export interface ServiceMapping {
 
 export interface MappingResult {
   mappings: ServiceMapping[];
+  unmapped: Array<{ service: string; reason: string }>;
 }
 
 // ─── Etapa 3: Preços reais ────────────────────────────────────────────────────
@@ -83,8 +129,11 @@ export type VerificationStatus = 'verified' | 'partial' | 'not_found' | 'no_api'
 export interface PriceEntry {
   price: number | null;
   unit?: string;
+  currency?: string;
   estimatedMonthly?: number | null;
   source?: string;
+  effectiveFrom?: string;
+  catalogOfferingId?: string;
   verified: boolean;
   reason?: string;
 }
@@ -122,7 +171,7 @@ export interface ClassificationResult {
   };
 }
 
-// ─── Etapa 5: Recomendação (Claude) ──────────────────────────────────────────
+// ─── Etapa 5: decisão por código + redação opcional por IA ───────────────────
 
 export interface RecommendationResult {
   recommendation: {

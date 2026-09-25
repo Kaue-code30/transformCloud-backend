@@ -1,0 +1,59 @@
+{
+  "provider": "GCP",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "compute.googleapis.com",
+      "name": "Compute Engine",
+      "resourceKind": "COMPUTE_VM"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:GCP:compute.googleapis.com:southamerica-east1:Linux:t2a-standard-8",
+      "serviceNativeCode": "compute.googleapis.com",
+      "nativeProductId": "gcp-product-t2a-standard-8",
+      "nativeSkuName": "t2a-standard-8",
+      "displayName": "Compute Engine t2a-standard-8 (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "family": "t2a",
+      "generation": "2",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:GCP:METER:t2a-standard-8:southamerica-east1",
+      "serviceNativeCode": "compute.googleapis.com",
+      "nativeSkuId": "gcp-sku-t2a-standard-8",
+      "nativeMeterId": "gcp-meter-t2a-standard-8",
+      "name": "Compute Engine instance hour (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true },
+      "tiers": [
+        { "startQuantity": 0, "unitPrice": 0.75 }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:GCP:compute.googleapis.com:southamerica-east1:Linux:t2a-standard-8",
+      "meterSourceKey": "TEST:GCP:METER:t2a-standard-8:southamerica-east1",
+      "quantity": 1
+    }
+  ]
+}

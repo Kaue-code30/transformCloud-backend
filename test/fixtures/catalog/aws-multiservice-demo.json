@@ -1,0 +1,329 @@
+{
+  "provider": "AWS",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "multiservice-demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "AmazonEC2",
+      "name": "Amazon EC2",
+      "resourceKind": "COMPUTE_VM"
+    },
+    {
+      "nativeCode": "AmazonRDS",
+      "name": "Amazon RDS PostgreSQL",
+      "resourceKind": "MANAGED_POSTGRES"
+    },
+    {
+      "nativeCode": "AmazonS3",
+      "name": "Amazon S3 Standard",
+      "resourceKind": "OBJECT_STORAGE"
+    },
+    {
+      "nativeCode": "AWSLambda",
+      "name": "AWS Lambda",
+      "resourceKind": "SERVERLESS_FUNCTION"
+    },
+    {
+      "nativeCode": "AmazonCloudWatch",
+      "name": "Amazon CloudWatch Logs",
+      "resourceKind": "OBSERVABILITY_LOGS"
+    },
+    {
+      "nativeCode": "AWSDataTransfer",
+      "name": "AWS Data Transfer",
+      "resourceKind": "DATA_TRANSFER"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AmazonEC2:sa-east-1:m7g.2xlarge",
+      "serviceNativeCode": "AmazonEC2",
+      "nativeProductId": "aws-sku-m7g-2xlarge",
+      "nativeSkuName": "m7g.2xlarge",
+      "displayName": "Amazon EC2 m7g.2xlarge (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "COMPUTE_VM"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AmazonRDS:sa-east-1:db.r6g.large",
+      "serviceNativeCode": "AmazonRDS",
+      "nativeProductId": "aws-sku-rds-db-r6g-large",
+      "nativeSkuName": "db.r6g.large",
+      "displayName": "Amazon RDS PostgreSQL db.r6g.large (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "engine": "PostgreSQL",
+      "vcpu": 2,
+      "memoryGiB": 16,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "MANAGED_POSTGRES"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AmazonS3:sa-east-1:S3-Standard",
+      "serviceNativeCode": "AmazonS3",
+      "nativeProductId": "aws-sku-s3-standard-storage",
+      "nativeSkuName": "S3-Standard",
+      "displayName": "Amazon S3 Standard S3-Standard (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBJECT_STORAGE"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AWSLambda:sa-east-1:Lambda-GB-Second",
+      "serviceNativeCode": "AWSLambda",
+      "nativeProductId": "aws-sku-lambda-gb-second",
+      "nativeSkuName": "Lambda-GB-Second",
+      "displayName": "AWS Lambda Lambda-GB-Second (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "SERVERLESS_FUNCTION"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AmazonCloudWatch:sa-east-1:CloudWatch-Logs-Ingested",
+      "serviceNativeCode": "AmazonCloudWatch",
+      "nativeProductId": "aws-sku-cloudwatch-logs",
+      "nativeSkuName": "CloudWatch-Logs-Ingested",
+      "displayName": "Amazon CloudWatch Logs CloudWatch-Logs-Ingested (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBSERVABILITY_LOGS"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AWS:OFFERING:AWSDataTransfer:sa-east-1:DataTransfer-Out",
+      "serviceNativeCode": "AWSDataTransfer",
+      "nativeProductId": "aws-sku-data-transfer-out",
+      "nativeSkuName": "DataTransfer-Out",
+      "displayName": "AWS Data Transfer DataTransfer-Out (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "DATA_TRANSFER"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:AWS:METER:AmazonEC2:sa-east-1:m7g.2xlarge",
+      "serviceNativeCode": "AmazonEC2",
+      "nativeSkuId": "aws-sku-m7g-2xlarge",
+      "nativeMeterId": "aws-meter-m7g-2xlarge",
+      "name": "Amazon EC2 Hrs (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 1.2
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AWS:METER:AmazonRDS:sa-east-1:db.r6g.large",
+      "serviceNativeCode": "AmazonRDS",
+      "nativeSkuId": "aws-sku-rds-db-r6g-large",
+      "nativeMeterId": "aws-meter-rds-db-r6g-large",
+      "name": "Amazon RDS PostgreSQL Hrs (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 1.125
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AWS:METER:AmazonS3:sa-east-1:S3-Standard",
+      "serviceNativeCode": "AmazonS3",
+      "nativeSkuId": "aws-sku-s3-standard-storage",
+      "nativeMeterId": "aws-meter-s3-standard-storage",
+      "name": "Amazon S3 Standard GB-Mo (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "GB-Mo",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.08
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AWS:METER:AWSLambda:sa-east-1:Lambda-GB-Second",
+      "serviceNativeCode": "AWSLambda",
+      "nativeSkuId": "aws-sku-lambda-gb-second",
+      "nativeMeterId": "aws-meter-lambda-gb-second",
+      "name": "AWS Lambda GB-Second (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "GB-Second",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.000208333
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AWS:METER:AmazonCloudWatch:sa-east-1:CloudWatch-Logs-Ingested",
+      "serviceNativeCode": "AmazonCloudWatch",
+      "nativeSkuId": "aws-sku-cloudwatch-logs",
+      "nativeMeterId": "aws-meter-cloudwatch-logs",
+      "name": "Amazon CloudWatch Logs GB (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.225
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AWS:METER:AWSDataTransfer:sa-east-1:DataTransfer-Out",
+      "serviceNativeCode": "AWSDataTransfer",
+      "nativeSkuId": "aws-sku-data-transfer-out",
+      "nativeMeterId": "aws-meter-data-transfer-out",
+      "name": "AWS Data Transfer GB (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.14
+        }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AmazonEC2:sa-east-1:m7g.2xlarge",
+      "meterSourceKey": "TEST:AWS:METER:AmazonEC2:sa-east-1:m7g.2xlarge",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AmazonRDS:sa-east-1:db.r6g.large",
+      "meterSourceKey": "TEST:AWS:METER:AmazonRDS:sa-east-1:db.r6g.large",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AmazonS3:sa-east-1:S3-Standard",
+      "meterSourceKey": "TEST:AWS:METER:AmazonS3:sa-east-1:S3-Standard",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AWSLambda:sa-east-1:Lambda-GB-Second",
+      "meterSourceKey": "TEST:AWS:METER:AWSLambda:sa-east-1:Lambda-GB-Second",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AmazonCloudWatch:sa-east-1:CloudWatch-Logs-Ingested",
+      "meterSourceKey": "TEST:AWS:METER:AmazonCloudWatch:sa-east-1:CloudWatch-Logs-Ingested",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AWS:OFFERING:AWSDataTransfer:sa-east-1:DataTransfer-Out",
+      "meterSourceKey": "TEST:AWS:METER:AWSDataTransfer:sa-east-1:DataTransfer-Out",
+      "quantity": 1
+    }
+  ]
+}

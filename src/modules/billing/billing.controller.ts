@@ -11,9 +11,12 @@ export class BillingController {
 
   @Post('analyze/stream')
   analyzeStream(@Body() billing: ParsedBilling, @Res() res: Response): void {
-    this.logger.log(`analyze/stream recebido — provider: ${billing?.provider}, serviços: ${billing?.topServices?.length ?? 'null'}`);
-    if (!billing?.provider || !billing?.topServices?.length) {
-      res.status(400).json({ message: 'Body inválido: provider e topServices são obrigatórios' });
+    const itemCount = billing?.lineItems?.length || billing?.topServices?.length || 0;
+    this.logger.log(`analyze/stream recebido — provider: ${billing?.provider}, itens: ${itemCount}`);
+    if (!billing?.provider || itemCount === 0) {
+      res.status(400).json({
+        message: 'Body inválido: provider e ao menos um item em lineItems ou topServices são obrigatórios',
+      });
       return;
     }
     res.setHeader('Content-Type', 'text/event-stream');

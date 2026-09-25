@@ -8,22 +8,26 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BillingModule = void 0;
 const common_1 = require("@nestjs/common");
-const azure_pricing_service_1 = require("./pricing/azure-pricing.service");
-const aws_pricing_service_1 = require("./pricing/aws-pricing.service");
-const gcp_pricing_service_1 = require("./pricing/gcp-pricing.service");
+const catalog_module_1 = require("../catalog/catalog.module");
 const pricing_orchestrator_service_1 = require("./pricing/pricing-orchestrator.service");
+const claude_service_1 = require("./ai/claude.service");
+const deterministic_mapping_service_1 = require("./mapping/deterministic-mapping.service");
+const pipeline_service_1 = require("./pipeline.service");
+const billing_controller_1 = require("./billing.controller");
 let BillingModule = class BillingModule {
 };
 exports.BillingModule = BillingModule;
 exports.BillingModule = BillingModule = __decorate([
     (0, common_1.Module)({
+        imports: [catalog_module_1.CatalogModule],
+        controllers: [billing_controller_1.BillingController],
         providers: [
-            azure_pricing_service_1.AzurePricingService,
-            aws_pricing_service_1.AwsPricingService,
-            gcp_pricing_service_1.GcpPricingService,
             pricing_orchestrator_service_1.PricingOrchestratorService,
+            deterministic_mapping_service_1.DeterministicMappingService,
+            claude_service_1.ClaudeService,
+            pipeline_service_1.PipelineService,
         ],
-        exports: [pricing_orchestrator_service_1.PricingOrchestratorService],
+        exports: [pipeline_service_1.PipelineService],
     })
 ], BillingModule);
 //# sourceMappingURL=billing.module.js.map

@@ -1,0 +1,329 @@
+{
+  "provider": "GCP",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "multiservice-demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "compute.googleapis.com",
+      "name": "Compute Engine",
+      "resourceKind": "COMPUTE_VM"
+    },
+    {
+      "nativeCode": "sqladmin.googleapis.com",
+      "name": "Cloud SQL for PostgreSQL",
+      "resourceKind": "MANAGED_POSTGRES"
+    },
+    {
+      "nativeCode": "storage.googleapis.com",
+      "name": "Cloud Storage Standard",
+      "resourceKind": "OBJECT_STORAGE"
+    },
+    {
+      "nativeCode": "cloudfunctions.googleapis.com",
+      "name": "Cloud Functions",
+      "resourceKind": "SERVERLESS_FUNCTION"
+    },
+    {
+      "nativeCode": "logging.googleapis.com",
+      "name": "Cloud Logging",
+      "resourceKind": "OBSERVABILITY_LOGS"
+    },
+    {
+      "nativeCode": "networking.googleapis.com",
+      "name": "Cloud Network Egress",
+      "resourceKind": "DATA_TRANSFER"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:GCP:OFFERING:compute.googleapis.com:southamerica-east1:t2a-standard-8",
+      "serviceNativeCode": "compute.googleapis.com",
+      "nativeProductId": "gcp-sku-t2a-standard-8",
+      "nativeSkuName": "t2a-standard-8",
+      "displayName": "Compute Engine t2a-standard-8 (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "COMPUTE_VM"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:GCP:OFFERING:sqladmin.googleapis.com:southamerica-east1:db-custom-2-16384",
+      "serviceNativeCode": "sqladmin.googleapis.com",
+      "nativeProductId": "gcp-sku-cloudsql-pg-2-16",
+      "nativeSkuName": "db-custom-2-16384",
+      "displayName": "Cloud SQL for PostgreSQL db-custom-2-16384 (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "engine": "PostgreSQL",
+      "vcpu": 2,
+      "memoryGiB": 16,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "MANAGED_POSTGRES"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:GCP:OFFERING:storage.googleapis.com:southamerica-east1:Standard-Regional",
+      "serviceNativeCode": "storage.googleapis.com",
+      "nativeProductId": "gcp-sku-storage-standard",
+      "nativeSkuName": "Standard-Regional",
+      "displayName": "Cloud Storage Standard Standard-Regional (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBJECT_STORAGE"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:GCP:OFFERING:cloudfunctions.googleapis.com:southamerica-east1:Functions-GB-Second",
+      "serviceNativeCode": "cloudfunctions.googleapis.com",
+      "nativeProductId": "gcp-sku-functions-gb-second",
+      "nativeSkuName": "Functions-GB-Second",
+      "displayName": "Cloud Functions Functions-GB-Second (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "SERVERLESS_FUNCTION"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:GCP:OFFERING:logging.googleapis.com:southamerica-east1:Logging-Data-Ingestion",
+      "serviceNativeCode": "logging.googleapis.com",
+      "nativeProductId": "gcp-sku-logging-ingestion",
+      "nativeSkuName": "Logging-Data-Ingestion",
+      "displayName": "Cloud Logging Logging-Data-Ingestion (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBSERVABILITY_LOGS"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:GCP:OFFERING:networking.googleapis.com:southamerica-east1:Internet-Egress",
+      "serviceNativeCode": "networking.googleapis.com",
+      "nativeProductId": "gcp-sku-network-egress",
+      "nativeSkuName": "Internet-Egress",
+      "displayName": "Cloud Network Egress Internet-Egress (fixture)",
+      "region": "southamerica-east1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "DATA_TRANSFER"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:GCP:METER:compute.googleapis.com:southamerica-east1:t2a-standard-8",
+      "serviceNativeCode": "compute.googleapis.com",
+      "nativeSkuId": "gcp-sku-t2a-standard-8",
+      "nativeMeterId": "gcp-meter-t2a-standard-8",
+      "name": "Compute Engine Hrs (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.75
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:GCP:METER:sqladmin.googleapis.com:southamerica-east1:db-custom-2-16384",
+      "serviceNativeCode": "sqladmin.googleapis.com",
+      "nativeSkuId": "gcp-sku-cloudsql-pg-2-16",
+      "nativeMeterId": "gcp-meter-cloudsql-pg-2-16",
+      "name": "Cloud SQL for PostgreSQL Hrs (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.82
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:GCP:METER:storage.googleapis.com:southamerica-east1:Standard-Regional",
+      "serviceNativeCode": "storage.googleapis.com",
+      "nativeSkuId": "gcp-sku-storage-standard",
+      "nativeMeterId": "gcp-meter-storage-standard",
+      "name": "Cloud Storage Standard GB-Mo (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "GB-Mo",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.026
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:GCP:METER:cloudfunctions.googleapis.com:southamerica-east1:Functions-GB-Second",
+      "serviceNativeCode": "cloudfunctions.googleapis.com",
+      "nativeSkuId": "gcp-sku-functions-gb-second",
+      "nativeMeterId": "gcp-meter-functions-gb-second",
+      "name": "Cloud Functions GB-Second (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "GB-Second",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.000018
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:GCP:METER:logging.googleapis.com:southamerica-east1:Logging-Data-Ingestion",
+      "serviceNativeCode": "logging.googleapis.com",
+      "nativeSkuId": "gcp-sku-logging-ingestion",
+      "nativeMeterId": "gcp-meter-logging-ingestion",
+      "name": "Cloud Logging GB (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.5
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:GCP:METER:networking.googleapis.com:southamerica-east1:Internet-Egress",
+      "serviceNativeCode": "networking.googleapis.com",
+      "nativeSkuId": "gcp-sku-network-egress",
+      "nativeMeterId": "gcp-meter-network-egress",
+      "name": "Cloud Network Egress GB (fixture)",
+      "region": "southamerica-east1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.12
+        }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:compute.googleapis.com:southamerica-east1:t2a-standard-8",
+      "meterSourceKey": "TEST:GCP:METER:compute.googleapis.com:southamerica-east1:t2a-standard-8",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:sqladmin.googleapis.com:southamerica-east1:db-custom-2-16384",
+      "meterSourceKey": "TEST:GCP:METER:sqladmin.googleapis.com:southamerica-east1:db-custom-2-16384",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:storage.googleapis.com:southamerica-east1:Standard-Regional",
+      "meterSourceKey": "TEST:GCP:METER:storage.googleapis.com:southamerica-east1:Standard-Regional",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:cloudfunctions.googleapis.com:southamerica-east1:Functions-GB-Second",
+      "meterSourceKey": "TEST:GCP:METER:cloudfunctions.googleapis.com:southamerica-east1:Functions-GB-Second",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:logging.googleapis.com:southamerica-east1:Logging-Data-Ingestion",
+      "meterSourceKey": "TEST:GCP:METER:logging.googleapis.com:southamerica-east1:Logging-Data-Ingestion",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:GCP:OFFERING:networking.googleapis.com:southamerica-east1:Internet-Egress",
+      "meterSourceKey": "TEST:GCP:METER:networking.googleapis.com:southamerica-east1:Internet-Egress",
+      "quantity": 1
+    }
+  ]
+}

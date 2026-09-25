@@ -1,0 +1,329 @@
+{
+  "provider": "OCI",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "multiservice-demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "Compute",
+      "name": "OCI Compute",
+      "resourceKind": "COMPUTE_VM"
+    },
+    {
+      "nativeCode": "Postgresql",
+      "name": "OCI Database with PostgreSQL",
+      "resourceKind": "MANAGED_POSTGRES"
+    },
+    {
+      "nativeCode": "ObjectStorage",
+      "name": "OCI Object Storage Standard",
+      "resourceKind": "OBJECT_STORAGE"
+    },
+    {
+      "nativeCode": "Functions",
+      "name": "OCI Functions",
+      "resourceKind": "SERVERLESS_FUNCTION"
+    },
+    {
+      "nativeCode": "Logging",
+      "name": "OCI Logging",
+      "resourceKind": "OBSERVABILITY_LOGS"
+    },
+    {
+      "nativeCode": "DataTransfer",
+      "name": "OCI Data Transfer",
+      "resourceKind": "DATA_TRANSFER"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:OCI:OFFERING:Compute:sa-saopaulo-1:VM.Standard.A1.Flex-8-32",
+      "serviceNativeCode": "Compute",
+      "nativeProductId": "oci-sku-a1-flex-8-32",
+      "nativeSkuName": "VM.Standard.A1.Flex-8-32",
+      "displayName": "OCI Compute VM.Standard.A1.Flex-8-32 (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "COMPUTE_VM"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:OCI:OFFERING:Postgresql:sa-saopaulo-1:PostgreSQL-2-16",
+      "serviceNativeCode": "Postgresql",
+      "nativeProductId": "oci-sku-postgresql-2-16",
+      "nativeSkuName": "PostgreSQL-2-16",
+      "displayName": "OCI Database with PostgreSQL PostgreSQL-2-16 (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "engine": "PostgreSQL",
+      "vcpu": 2,
+      "memoryGiB": 16,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "MANAGED_POSTGRES"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:OCI:OFFERING:ObjectStorage:sa-saopaulo-1:Object-Storage-Standard",
+      "serviceNativeCode": "ObjectStorage",
+      "nativeProductId": "oci-sku-object-standard",
+      "nativeSkuName": "Object-Storage-Standard",
+      "displayName": "OCI Object Storage Standard Object-Storage-Standard (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBJECT_STORAGE"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:OCI:OFFERING:Functions:sa-saopaulo-1:Functions-GB-Second",
+      "serviceNativeCode": "Functions",
+      "nativeProductId": "oci-sku-functions-gb-second",
+      "nativeSkuName": "Functions-GB-Second",
+      "displayName": "OCI Functions Functions-GB-Second (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "SERVERLESS_FUNCTION"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:OCI:OFFERING:Logging:sa-saopaulo-1:Logging-Data-Ingestion",
+      "serviceNativeCode": "Logging",
+      "nativeProductId": "oci-sku-logging-ingestion",
+      "nativeSkuName": "Logging-Data-Ingestion",
+      "displayName": "OCI Logging Logging-Data-Ingestion (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBSERVABILITY_LOGS"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:OCI:OFFERING:DataTransfer:sa-saopaulo-1:Internet-Egress",
+      "serviceNativeCode": "DataTransfer",
+      "nativeProductId": "oci-sku-data-transfer-egress",
+      "nativeSkuName": "Internet-Egress",
+      "displayName": "OCI Data Transfer Internet-Egress (fixture)",
+      "region": "sa-saopaulo-1",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "DATA_TRANSFER"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:OCI:METER:Compute:sa-saopaulo-1:VM.Standard.A1.Flex-8-32",
+      "serviceNativeCode": "Compute",
+      "nativeSkuId": "oci-sku-a1-flex-8-32",
+      "nativeMeterId": "oci-meter-a1-flex-8-32",
+      "name": "OCI Compute Hrs (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.7
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:OCI:METER:Postgresql:sa-saopaulo-1:PostgreSQL-2-16",
+      "serviceNativeCode": "Postgresql",
+      "nativeSkuId": "oci-sku-postgresql-2-16",
+      "nativeMeterId": "oci-meter-postgresql-2-16",
+      "name": "OCI Database with PostgreSQL Hrs (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.65
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:OCI:METER:ObjectStorage:sa-saopaulo-1:Object-Storage-Standard",
+      "serviceNativeCode": "ObjectStorage",
+      "nativeSkuId": "oci-sku-object-standard",
+      "nativeMeterId": "oci-meter-object-standard",
+      "name": "OCI Object Storage Standard GB-Mo (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "GB-Mo",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.0255
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:OCI:METER:Functions:sa-saopaulo-1:Functions-GB-Second",
+      "serviceNativeCode": "Functions",
+      "nativeSkuId": "oci-sku-functions-gb-second",
+      "nativeMeterId": "oci-meter-functions-gb-second",
+      "name": "OCI Functions GB-Second (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "GB-Second",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.00001417
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:OCI:METER:Logging:sa-saopaulo-1:Logging-Data-Ingestion",
+      "serviceNativeCode": "Logging",
+      "nativeSkuId": "oci-sku-logging-ingestion",
+      "nativeMeterId": "oci-meter-logging-ingestion",
+      "name": "OCI Logging GB (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.05
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:OCI:METER:DataTransfer:sa-saopaulo-1:Internet-Egress",
+      "serviceNativeCode": "DataTransfer",
+      "nativeSkuId": "oci-sku-data-transfer-egress",
+      "nativeMeterId": "oci-meter-data-transfer-egress",
+      "name": "OCI Data Transfer GB (fixture)",
+      "region": "sa-saopaulo-1",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.0085
+        }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:Compute:sa-saopaulo-1:VM.Standard.A1.Flex-8-32",
+      "meterSourceKey": "TEST:OCI:METER:Compute:sa-saopaulo-1:VM.Standard.A1.Flex-8-32",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:Postgresql:sa-saopaulo-1:PostgreSQL-2-16",
+      "meterSourceKey": "TEST:OCI:METER:Postgresql:sa-saopaulo-1:PostgreSQL-2-16",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:ObjectStorage:sa-saopaulo-1:Object-Storage-Standard",
+      "meterSourceKey": "TEST:OCI:METER:ObjectStorage:sa-saopaulo-1:Object-Storage-Standard",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:Functions:sa-saopaulo-1:Functions-GB-Second",
+      "meterSourceKey": "TEST:OCI:METER:Functions:sa-saopaulo-1:Functions-GB-Second",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:Logging:sa-saopaulo-1:Logging-Data-Ingestion",
+      "meterSourceKey": "TEST:OCI:METER:Logging:sa-saopaulo-1:Logging-Data-Ingestion",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:OCI:OFFERING:DataTransfer:sa-saopaulo-1:Internet-Egress",
+      "meterSourceKey": "TEST:OCI:METER:DataTransfer:sa-saopaulo-1:Internet-Egress",
+      "quantity": 1
+    }
+  ]
+}

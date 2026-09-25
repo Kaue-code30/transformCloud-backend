@@ -1,0 +1,329 @@
+{
+  "provider": "AZURE",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "multiservice-demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "Microsoft.Compute/virtualMachines",
+      "name": "Virtual Machines",
+      "resourceKind": "COMPUTE_VM"
+    },
+    {
+      "nativeCode": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "name": "Azure Database for PostgreSQL",
+      "resourceKind": "MANAGED_POSTGRES"
+    },
+    {
+      "nativeCode": "Microsoft.Storage/storageAccounts",
+      "name": "Azure Blob Storage Hot LRS",
+      "resourceKind": "OBJECT_STORAGE"
+    },
+    {
+      "nativeCode": "Microsoft.Web/functions",
+      "name": "Azure Functions",
+      "resourceKind": "SERVERLESS_FUNCTION"
+    },
+    {
+      "nativeCode": "Microsoft.OperationalInsights/workspaces",
+      "name": "Azure Monitor Logs",
+      "resourceKind": "OBSERVABILITY_LOGS"
+    },
+    {
+      "nativeCode": "Microsoft.Network/bandwidth",
+      "name": "Azure Bandwidth",
+      "resourceKind": "DATA_TRANSFER"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.Compute/virtualMachines:brazilsouth:Standard_D8ps_v5",
+      "serviceNativeCode": "Microsoft.Compute/virtualMachines",
+      "nativeProductId": "azure-sku-standard-d8ps-v5",
+      "nativeSkuName": "Standard_D8ps_v5",
+      "displayName": "Virtual Machines Standard_D8ps_v5 (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "COMPUTE_VM"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.DBforPostgreSQL/flexibleServers:brazilsouth:Standard_D2ds_v5",
+      "serviceNativeCode": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "nativeProductId": "azure-sku-postgres-d2ds-v5",
+      "nativeSkuName": "Standard_D2ds_v5",
+      "displayName": "Azure Database for PostgreSQL Standard_D2ds_v5 (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "engine": "PostgreSQL",
+      "vcpu": 2,
+      "memoryGiB": 16,
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "MANAGED_POSTGRES"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.Storage/storageAccounts:brazilsouth:Blob-Hot-LRS",
+      "serviceNativeCode": "Microsoft.Storage/storageAccounts",
+      "nativeProductId": "azure-sku-blob-hot-lrs",
+      "nativeSkuName": "Blob-Hot-LRS",
+      "displayName": "Azure Blob Storage Hot LRS Blob-Hot-LRS (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBJECT_STORAGE"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.Web/functions:brazilsouth:Functions-GB-Second",
+      "serviceNativeCode": "Microsoft.Web/functions",
+      "nativeProductId": "azure-sku-functions-gb-second",
+      "nativeSkuName": "Functions-GB-Second",
+      "displayName": "Azure Functions Functions-GB-Second (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "SERVERLESS_FUNCTION"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.OperationalInsights/workspaces:brazilsouth:Logs-Data-Ingestion",
+      "serviceNativeCode": "Microsoft.OperationalInsights/workspaces",
+      "nativeProductId": "azure-sku-monitor-logs",
+      "nativeSkuName": "Logs-Data-Ingestion",
+      "displayName": "Azure Monitor Logs Logs-Data-Ingestion (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "OBSERVABILITY_LOGS"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    },
+    {
+      "sourceKey": "TEST:AZURE:OFFERING:Microsoft.Network/bandwidth:brazilsouth:Internet-Egress",
+      "serviceNativeCode": "Microsoft.Network/bandwidth",
+      "nativeProductId": "azure-sku-bandwidth-egress",
+      "nativeSkuName": "Internet-Egress",
+      "displayName": "Azure Bandwidth Internet-Egress (fixture)",
+      "region": "brazilsouth",
+      "purchaseOption": "ON_DEMAND",
+      "attributes": {
+        "fixture": true,
+        "resourceKind": "DATA_TRANSFER"
+      },
+      "rawSource": {
+        "fixture": true
+      }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.Compute/virtualMachines:brazilsouth:Standard_D8ps_v5",
+      "serviceNativeCode": "Microsoft.Compute/virtualMachines",
+      "nativeSkuId": "azure-sku-standard-d8ps-v5",
+      "nativeMeterId": "azure-meter-standard-d8ps-v5",
+      "name": "Virtual Machines Hrs (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.85
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.DBforPostgreSQL/flexibleServers:brazilsouth:Standard_D2ds_v5",
+      "serviceNativeCode": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "nativeSkuId": "azure-sku-postgres-d2ds-v5",
+      "nativeMeterId": "azure-meter-postgres-d2ds-v5",
+      "name": "Azure Database for PostgreSQL Hrs (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.95
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.Storage/storageAccounts:brazilsouth:Blob-Hot-LRS",
+      "serviceNativeCode": "Microsoft.Storage/storageAccounts",
+      "nativeSkuId": "azure-sku-blob-hot-lrs",
+      "nativeMeterId": "azure-meter-blob-hot-lrs",
+      "name": "Azure Blob Storage Hot LRS GB-Mo (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "GB-Mo",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.022
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.Web/functions:brazilsouth:Functions-GB-Second",
+      "serviceNativeCode": "Microsoft.Web/functions",
+      "nativeSkuId": "azure-sku-functions-gb-second",
+      "nativeMeterId": "azure-meter-functions-gb-second",
+      "name": "Azure Functions GB-Second (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "GB-Second",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.000016
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.OperationalInsights/workspaces:brazilsouth:Logs-Data-Ingestion",
+      "serviceNativeCode": "Microsoft.OperationalInsights/workspaces",
+      "nativeSkuId": "azure-sku-monitor-logs",
+      "nativeMeterId": "azure-meter-monitor-logs",
+      "name": "Azure Monitor Logs GB (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 2.76
+        }
+      ]
+    },
+    {
+      "sourceKey": "TEST:AZURE:METER:Microsoft.Network/bandwidth:brazilsouth:Internet-Egress",
+      "serviceNativeCode": "Microsoft.Network/bandwidth",
+      "nativeSkuId": "azure-sku-bandwidth-egress",
+      "nativeMeterId": "azure-meter-bandwidth-egress",
+      "name": "Azure Bandwidth GB (fixture)",
+      "region": "brazilsouth",
+      "pricingUnit": "GB",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": {
+        "fixture": true
+      },
+      "rawSource": {
+        "fixture": true
+      },
+      "tiers": [
+        {
+          "startQuantity": 0,
+          "unitPrice": 0.12
+        }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.Compute/virtualMachines:brazilsouth:Standard_D8ps_v5",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.Compute/virtualMachines:brazilsouth:Standard_D8ps_v5",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.DBforPostgreSQL/flexibleServers:brazilsouth:Standard_D2ds_v5",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.DBforPostgreSQL/flexibleServers:brazilsouth:Standard_D2ds_v5",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.Storage/storageAccounts:brazilsouth:Blob-Hot-LRS",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.Storage/storageAccounts:brazilsouth:Blob-Hot-LRS",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.Web/functions:brazilsouth:Functions-GB-Second",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.Web/functions:brazilsouth:Functions-GB-Second",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.OperationalInsights/workspaces:brazilsouth:Logs-Data-Ingestion",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.OperationalInsights/workspaces:brazilsouth:Logs-Data-Ingestion",
+      "quantity": 1
+    },
+    {
+      "offeringSourceKey": "TEST:AZURE:OFFERING:Microsoft.Network/bandwidth:brazilsouth:Internet-Egress",
+      "meterSourceKey": "TEST:AZURE:METER:Microsoft.Network/bandwidth:brazilsouth:Internet-Egress",
+      "quantity": 1
+    }
+  ]
+}

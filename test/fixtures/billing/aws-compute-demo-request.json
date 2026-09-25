@@ -1,0 +1,37 @@
+{
+  "provider": "AWS",
+  "period": {
+    "start": "2026-09-01",
+    "end": "2026-09-30"
+  },
+  "currency": "USD",
+  "totalCost": 1000,
+  "dataQuality": "good",
+  "targetRegion": "Brasil",
+  "topServices": [],
+  "lineItems": [
+    {
+      "sourceKey": "demo-aws-m7g",
+      "provider": "AWS",
+      "serviceCode": "AmazonEC2",
+      "serviceName": "Amazon EC2",
+      "skuId": "aws-sku-m7g-2xlarge",
+      "meterId": "aws-meter-m7g-2xlarge",
+      "nativeSkuName": "m7g.2xlarge",
+      "nativeProductId": "aws-sku-m7g-2xlarge",
+      "region": "sa-east-1",
+      "usageType": "BoxUsage:m7g.2xlarge",
+      "operation": "RunInstances",
+      "quantity": 730,
+      "unit": "Hrs",
+      "cost": 1000,
+      "currency": "USD",
+      "attributes": {
+        "vcpu": 8,
+        "memoryGiB": 32,
+        "architecture": "arm64",
+        "operatingSystem": "Linux"
+      }
+    }
+  ]
+}

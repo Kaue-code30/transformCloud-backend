@@ -1,0 +1,59 @@
+{
+  "provider": "AWS",
+  "source": "TEST_FIXTURE_ONLY",
+  "version": "demo-2026-09-25",
+  "mode": "PARTIAL",
+  "services": [
+    {
+      "nativeCode": "AmazonEC2",
+      "name": "Amazon EC2",
+      "resourceKind": "COMPUTE_VM"
+    }
+  ],
+  "offerings": [
+    {
+      "sourceKey": "TEST:AWS:AmazonEC2:sa-east-1:Linux:m7g.2xlarge",
+      "serviceNativeCode": "AmazonEC2",
+      "nativeProductId": "aws-sku-m7g-2xlarge",
+      "nativeSkuName": "m7g.2xlarge",
+      "displayName": "Amazon EC2 m7g.2xlarge (fixture)",
+      "region": "sa-east-1",
+      "purchaseOption": "ON_DEMAND",
+      "operatingSystem": "Linux",
+      "architecture": "arm64",
+      "family": "m7g",
+      "generation": "7",
+      "vcpu": 8,
+      "memoryGiB": 32,
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true }
+    }
+  ],
+  "meters": [
+    {
+      "sourceKey": "TEST:AWS:METER:m7g.2xlarge:sa-east-1",
+      "serviceNativeCode": "AmazonEC2",
+      "nativeSkuId": "aws-sku-m7g-2xlarge",
+      "nativeMeterId": "aws-meter-m7g-2xlarge",
+      "name": "EC2 instance hour (fixture)",
+      "region": "sa-east-1",
+      "pricingUnit": "Hrs",
+      "unitMultiplier": 1,
+      "currency": "USD",
+      "priceType": "ON_DEMAND",
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "attributes": { "fixture": true },
+      "rawSource": { "fixture": true },
+      "tiers": [
+        { "startQuantity": 0, "unitPrice": 1.2 }
+      ]
+    }
+  ],
+  "offeringMeters": [
+    {
+      "offeringSourceKey": "TEST:AWS:AmazonEC2:sa-east-1:Linux:m7g.2xlarge",
+      "meterSourceKey": "TEST:AWS:METER:m7g.2xlarge:sa-east-1",
+      "quantity": 1
+    }
+  ]
+}

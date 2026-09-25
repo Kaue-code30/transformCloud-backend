@@ -5,6 +5,93 @@
 
 ---
 
+## [2026-09-25] — Sincronizador oficial GCP
+
+**Objetivo:** normalizar o Cloud Billing Catalog API no catálogo interno.
+
+**Implementado:** resolução de serviços, paginação de SKUs, região, `pricingExpression`, unidades, moedas, vigência e tiers. O comando `catalog:sync:gcp` exige `GCP_API_KEY` e mantém importação parcial/idempotente.
+
+**Validação:** chave configurada e sincronização real executada para `Cloud Run Functions` em `southamerica-east1`: 22 ofertas, 22 medidores e 68 itens importados, versão `2026-09-25T07:00:00Z`. No teste ponta a ponta, a AWS Lambda foi precificada em USD 0,42 pelo registro oficial do GCP, com fonte `GCP_CLOUD_BILLING_CATALOG_API`; o cenário completo permaneceu com 6/6 serviços verificados e 100% do custo coberto.
+
+**Correções após a validação real:** alias determinístico `Cloud Functions` → `Cloud Run Functions`, normalização de `ON_DEMAND`, compatibilidade entre unidades AWS/GCP (`GB-Second`/`GiBy.s`, `GB-Mo`/`GiBy.mo` e `GB`/`GiBy`) e separação entre score semântico e penalidade de ranking para priorizar registros oficiais sem reduzir a confiança do match.
+
+---
+
+## [2026-09-25] — Primeiro sincronizador de catálogo oficial
+
+**Objetivo:** iniciar a substituição das fixtures por dados publicados pelos provedores.
+
+**Implementado:**
+- Adapter do AWS Price List Bulk API para produtos, ofertas On-Demand, dimensões, unidades, moedas, vigência e tiers.
+- Comando `catalog:sync:aws` com filtros obrigatórios de serviço/região e limites de importação.
+- Proteção contra escolha automática quando existem vários medidores incompatíveis para um recurso sem capacidade.
+- Teste do normalizador usando a estrutura oficial da AWS.
+
+**Validação:** sincronização real do AWS Lambda em `sa-east-1`, versão `20260919002359`, com 3 ofertas, 7 medidores e 18 itens importados. A fonte persistida é `AWS_PRICE_LIST_BULK_API`.
+
+---
+
+## [2026-09-25] — Catálogo multisser serviço com cobertura completa
+
+**Objetivo:** mapear todos os serviços do billing de demonstração sem reutilizar equivalências de tipos diferentes.
+
+**Implementado:**
+- Matching por `resourceKind` para banco gerenciado, object storage, função serverless, logs e transferência.
+- Novos tipos `SERVERLESS_FUNCTION` e `OBSERVABILITY_LOGS` no Prisma e migration correspondente.
+- Snapshots de teste AWS, GCP, Azure e OCI com seis serviços por provedor.
+- Quantidade e unidade nativas preservadas no cálculo de cada oferta.
+
+**Validação:** CSV completo processado pelo frontend/backend com 6/6 serviços verificados, 100% de cobertura e nenhum item não mapeado. Os snapshots usam `TEST_FIXTURE_ONLY` e não representam tabelas comerciais oficiais.
+
+---
+
+## [2026-09-25] — Isolamento do matcher por tipo de recurso
+
+**Objetivo:** impedir que serviços não compute reutilizem equivalências e preços de máquinas virtuais.
+
+**Implementado:**
+- O matcher de capacidade agora aceita somente serviços identificados como `COMPUTE_VM`.
+- Amazon RDS e outros tipos sem estratégia própria permanecem explicitamente não mapeados.
+- A precificação usa a quantidade real da linha para unidades como `Hrs`, sem cair indevidamente em 730 horas.
+- Testes de regressão cobrem RDS com vCPU/memória e quantidade em `Hrs`.
+
+**Validação:** 2 suítes e 4 testes passaram, incluindo a garantia de que RDS não consulta candidatos de compute.
+
+---
+
+## [2026-09-25] — Teste validado e contrato do frontend
+
+**Objetivo:** documentar o fluxo determinístico validado e preparar o consumo pelo frontend.
+
+**Implementado:**
+- Fixtures sintéticas de AWS, GCP e Azure e uma requisição de billing reproduzível.
+- Endpoint aceita `lineItems` mesmo quando `topServices` está vazio.
+- Execução sem `ANTHROPIC_API_KEY` usa explicação determinística sem tentativa de rede.
+- Mensagem de progresso da recomendação não afirma mais que a decisão foi produzida pela IA.
+- Documentação de billing e contexto reescrita para refletir catálogo, SSE e responsabilidades atuais.
+
+**Validação:** cenário ponta a ponta concluiu com GCP a USD 547,50, Azure a USD 620,50, cobertura de 100%, recomendação GCP e payback de 7 meses.
+
+---
+
+## [2026-09-24] — Catálogo local e remoção da IA do mapeamento
+
+**Objetivo:** tornar SKUs, equivalências e preços dados auditáveis da aplicação.
+
+**Implementado:**
+- Modelos Prisma para serviços, ofertas, medidores, tiers, overrides e execuções de importação.
+- Importador idempotente de snapshots via `npm run catalog:import`.
+- Matcher determinístico inicial para `COMPUTE_VM`.
+- Precificação local por múltiplos medidores e faixas de preço.
+- Claude removido da etapa de mapeamento.
+- Ranking do provedor movido para código; Claude apenas redige a explicação sem poder alterar a decisão.
+- Suporte a identificadores nativos e linhas detalhadas no contrato de billing.
+- Testes do matcher e do calculador de catálogo.
+
+**Limite atual:** adaptadores de ingestão dos payloads oficiais e matchers de banco/storage/cache ainda são próximos incrementos.
+
+---
+
 ## [2026-05-22] — Billing Pipeline V2: Pipeline Completo + SSE + Melhorias de Cobertura
 
 **Objetivo:** Completar as etapas 2, 5 e 6 do pipeline (Claude), expor endpoint SSE para o frontend, e maximizar a taxa de match nas APIs de preço.

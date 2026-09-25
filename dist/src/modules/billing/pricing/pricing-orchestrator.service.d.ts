@@ -1,16 +1,17 @@
-import { AzurePricingService } from './azure-pricing.service';
-import { AwsPricingService } from './aws-pricing.service';
-import { GcpPricingService } from './gcp-pricing.service';
-import { ParsedBilling, MappingResult, ClassificationResult } from '../types/pipeline.types';
+import { CatalogPricingService } from '../../catalog/catalog-pricing.service';
+import type { BillingLineItem, ClassificationResult, CloudProvider, MappingResult, TopService } from '../types/pipeline.types';
 export declare class PricingOrchestratorService {
-    private readonly azure;
-    private readonly aws;
-    private readonly gcp;
-    constructor(azure: AzurePricingService, aws: AwsPricingService, gcp: GcpPricingService);
-    fetchPrices(billing: ParsedBilling, mappings: MappingResult): Promise<ClassificationResult>;
+    private readonly catalogPricing;
+    constructor(catalogPricing: CatalogPricingService);
+    fetchPrices(billing: {
+        provider: CloudProvider;
+        totalCost: number;
+        currency: string;
+        topServices: TopService[];
+        lineItems?: BillingLineItem[];
+    }, mappings: MappingResult): Promise<ClassificationResult>;
     private fetchServicePrice;
+    private priceForMapping;
     private classify;
     private resolveStatus;
-    private notAvailable;
-    private estimateHours;
 }

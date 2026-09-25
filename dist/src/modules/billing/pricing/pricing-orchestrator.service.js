@@ -11,70 +11,83 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PricingOrchestratorService = void 0;
 const common_1 = require("@nestjs/common");
-const azure_pricing_service_1 = require("./azure-pricing.service");
-const aws_pricing_service_1 = require("./aws-pricing.service");
-const gcp_pricing_service_1 = require("./gcp-pricing.service");
+const catalog_pricing_service_1 = require("../../catalog/catalog-pricing.service");
 let PricingOrchestratorService = class PricingOrchestratorService {
-    azure;
-    aws;
-    gcp;
-    constructor(azure, aws, gcp) {
-        this.azure = azure;
-        this.aws = aws;
-        this.gcp = gcp;
+    catalogPricing;
+    constructor(catalogPricing) {
+        this.catalogPricing = catalogPricing;
     }
     async fetchPrices(billing, mappings) {
-        const results = await Promise.all(billing.topServices.map((svc) => {
-            const mapping = mappings.mappings.find((m) => m.original.toLowerCase().includes(svc.name.toLowerCase()));
-            return this.fetchServicePrice(svc, mapping ?? null);
+        const results = await Promise.all(billing.topServices.map((service) => {
+            const mapping = mappings.mappings.find((item) => normalize(item.original) === normalize(service.name));
+            const lineItem = findLineItem(service, billing.lineItems ?? []);
+            return this.fetchServicePrice(service, mapping ?? null, lineItem);
         }));
-        return this.classify(results, billing.totalCost);
+        return this.classify(results, billing.totalCost, billing.provider, billing.currency);
     }
-    async fetchServicePrice(svc, mapping) {
-        const hours = this.estimateHours(svc);
-        const [gcpEntry, azureEntry] = await Promise.all([
-            mapping?.gcp
-                ? this.gcp.getPrice(mapping.gcp, hours)
-                : this.notAvailable('Sem mapeamento GCP'),
-            mapping?.azure
-                ? this.azure.getPrice(mapping.azure, hours)
-                : this.notAvailable('Sem mapeamento Azure'),
+    async fetchServicePrice(service, mapping, lineItem) {
+        const usageQuantity = estimateUsageQuantity(service, lineItem);
+        const [gcp, azure, aws, oci] = await Promise.all([
+            this.priceForMapping(mapping?.gcp, usageQuantity, 'GCP'),
+            this.priceForMapping(mapping?.azure, usageQuantity, 'Azure'),
+            this.priceForMapping(mapping?.aws, usageQuantity, 'AWS'),
+            this.priceForMapping(mapping?.oci, usageQuantity, 'OCI'),
         ]);
-        const ociEntry = {
-            price: null,
-            verified: false,
-            reason: 'API pública não disponível para OCI',
-        };
         return {
-            service: svc.name,
-            currentCost: svc.cost,
-            gcp: gcpEntry,
-            azure: azureEntry,
-            oci: ociEntry,
+            service: service.name,
+            currentCost: service.cost,
+            gcp,
+            azure,
+            oci,
+            aws,
             gcpConfidence: mapping?.gcp?.confidence ?? null,
             azureConfidence: mapping?.azure?.confidence ?? null,
+            ociConfidence: mapping?.oci?.confidence ?? null,
+            awsConfidence: mapping?.aws?.confidence ?? null,
         };
     }
-    classify(raw, totalCost) {
+    async priceForMapping(mapping, usageQuantity, provider) {
+        if (!mapping)
+            return notAvailable(`Sem mapeamento determinístico para ${provider}`);
+        const price = await this.catalogPricing.calculate(mapping.catalogOfferingId, usageQuantity);
+        if (!price) {
+            return notAvailable(`Oferta ${mapping.catalogOfferingId} sem preço vigente no catálogo`);
+        }
+        return {
+            price: price.unitPrice,
+            unit: price.unit,
+            currency: price.currency,
+            estimatedMonthly: price.estimatedCost,
+            source: price.source,
+            effectiveFrom: price.effectiveFrom,
+            catalogOfferingId: mapping.catalogOfferingId,
+            verified: true,
+        };
+    }
+    classify(raw, totalCost, sourceProvider, billingCurrency) {
         const classified = raw.map((item) => ({
             service: item.service,
             currentCost: item.currentCost,
             gcp: item.gcp,
             azure: item.azure,
             oci: item.oci,
-            gcpStatus: this.resolveStatus(item.gcp, item.gcpConfidence),
-            azureStatus: this.resolveStatus(item.azure, item.azureConfidence),
-            ociStatus: 'no_api',
+            aws: item.aws,
+            gcpStatus: this.resolveStatus(item.gcp, item.gcpConfidence, billingCurrency),
+            azureStatus: this.resolveStatus(item.azure, item.azureConfidence, billingCurrency),
+            ociStatus: this.resolveStatus(item.oci, item.ociConfidence, billingCurrency),
+            awsStatus: this.resolveStatus(item.aws, item.awsConfidence, billingCurrency),
         }));
+        const statusesForTargets = (item) => targetProviders(sourceProvider).map((provider) => statusFor(item, provider));
+        const isVerified = (item) => statusesForTargets(item).includes('verified');
         const verifiedCost = classified
-            .filter((c) => c.gcpStatus === 'verified' || c.azureStatus === 'verified')
-            .reduce((sum, c) => sum + c.currentCost, 0);
-        const verifiedServices = classified.filter((c) => c.gcpStatus === 'verified' || c.azureStatus === 'verified').length;
-        const partialServices = classified.filter((c) => (c.gcpStatus === 'partial' || c.azureStatus === 'partial') &&
-            c.gcpStatus !== 'verified' &&
-            c.azureStatus !== 'verified').length;
-        const notFoundServices = classified.filter((c) => c.gcpStatus === 'not_found' &&
-            c.azureStatus === 'not_found').length;
+            .filter(isVerified)
+            .reduce((sum, item) => sum + item.currentCost, 0);
+        const verifiedServices = classified.filter(isVerified).length;
+        const partialServices = classified.filter((item) => {
+            const statuses = statusesForTargets(item);
+            return statuses.includes('partial') && !statuses.includes('verified');
+        }).length;
+        const notFoundServices = classified.filter((item) => statusesForTargets(item).every((status) => status === 'not_found' || status === 'no_api')).length;
         return {
             classified,
             meta: {
@@ -83,35 +96,81 @@ let PricingOrchestratorService = class PricingOrchestratorService {
                 partialServices,
                 notFoundServices,
                 coveredCostPct: totalCost > 0
-                    ? Math.round((verifiedCost / totalCost) * 100)
+                    ? Math.min(100, Math.round((verifiedCost / totalCost) * 100))
                     : 0,
             },
         };
     }
-    resolveStatus(entry, confidence) {
+    resolveStatus(entry, confidence, billingCurrency) {
         if (!entry.verified || entry.price === null)
             return 'not_found';
+        if (entry.currency && entry.currency !== billingCurrency)
+            return 'partial';
         if (confidence === 'high')
             return 'verified';
         if (confidence === 'medium' || confidence === 'low')
             return 'partial';
-        return 'verified';
-    }
-    notAvailable(reason) {
-        return { price: null, verified: false, reason };
-    }
-    estimateHours(svc) {
-        const match = svc.quantity.match(/(\d+)\s*hora/i);
-        if (match)
-            return parseInt(match[1]);
-        return 730;
+        return 'not_found';
     }
 };
 exports.PricingOrchestratorService = PricingOrchestratorService;
 exports.PricingOrchestratorService = PricingOrchestratorService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [azure_pricing_service_1.AzurePricingService,
-        aws_pricing_service_1.AwsPricingService,
-        gcp_pricing_service_1.GcpPricingService])
+    __metadata("design:paramtypes", [catalog_pricing_service_1.CatalogPricingService])
 ], PricingOrchestratorService);
+function estimateUsageQuantity(service, lineItem) {
+    if (lineItem &&
+        Number.isFinite(lineItem.quantity) &&
+        lineItem.quantity > 0) {
+        return lineItem.quantity;
+    }
+    if (service.usageQuantity != null &&
+        Number.isFinite(service.usageQuantity) &&
+        service.usageQuantity > 0) {
+        return service.usageQuantity;
+    }
+    const match = String(service.quantity ?? '').match(/([\d.,]+)\s*(?:instance[- ]?)?(?:hrs?|hours?|horas?)?/i);
+    if (!match)
+        return 730;
+    return parseLocaleNumber(match[1]) ?? 730;
+}
+function parseLocaleNumber(value) {
+    const normalized = /^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(value)
+        ? value.replace(/\./g, '').replace(',', '.')
+        : /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(value)
+            ? value.replace(/,/g, '')
+            : value.replace(',', '.');
+    const result = Number(normalized);
+    return Number.isFinite(result) && result > 0 ? result : null;
+}
+function findLineItem(service, lineItems) {
+    if (service.sourceLineItemKey) {
+        const exact = lineItems.find((item) => item.sourceKey === service.sourceLineItemKey);
+        if (exact)
+            return exact;
+    }
+    const wanted = normalize(service.name);
+    return lineItems.find((item) => [item.serviceCode, item.serviceName].filter(Boolean).some((value) => {
+        const candidate = normalize(value);
+        return candidate.includes(wanted) || wanted.includes(candidate);
+    }));
+}
+function targetProviders(source) {
+    return ['AWS', 'GCP', 'AZURE', 'OCI'].filter((provider) => provider !== source);
+}
+function statusFor(item, provider) {
+    if (provider === 'AWS')
+        return item.awsStatus;
+    if (provider === 'GCP')
+        return item.gcpStatus;
+    if (provider === 'AZURE')
+        return item.azureStatus;
+    return item.ociStatus;
+}
+function notAvailable(reason) {
+    return { price: null, verified: false, reason };
+}
+function normalize(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 //# sourceMappingURL=pricing-orchestrator.service.js.map
