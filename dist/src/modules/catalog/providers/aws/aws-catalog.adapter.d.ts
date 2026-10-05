@@ -29,6 +29,7 @@ export interface AwsCatalogSyncOptions {
     serviceCode: string;
     region: string;
     match?: string;
+    productSkus?: string[];
     maxProducts?: number;
 }
 export declare class AwsCatalogAdapter {

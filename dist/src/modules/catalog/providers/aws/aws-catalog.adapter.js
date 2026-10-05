@@ -27,10 +27,14 @@ let AwsCatalogAdapter = class AwsCatalogAdapter {
         const meters = [];
         const offeringMeters = [];
         const needle = options.match?.toLowerCase();
+        const requestedSkus = new Set((options.productSkus ?? []).map((sku) => sku.trim().toUpperCase()));
         const limit = options.maxProducts ?? 500;
         for (const product of Object.values(payload.products)) {
             if (offerings.length >= limit)
                 break;
+            if (requestedSkus.size && !requestedSkus.has(product.sku.toUpperCase())) {
+                continue;
+            }
             const searchable = JSON.stringify(product).toLowerCase();
             if (needle && !searchable.includes(needle))
                 continue;
@@ -94,6 +98,13 @@ let AwsCatalogAdapter = class AwsCatalogAdapter {
         }
         if (!offerings.length) {
             throw new common_1.BadRequestException('Nenhuma oferta compatível encontrada no arquivo oficial da AWS');
+        }
+        if (requestedSkus.size) {
+            const importedSkus = new Set(offerings.map((offering) => offering.nativeProductId?.toUpperCase()));
+            const missingSkus = [...requestedSkus].filter((sku) => !importedSkus.has(sku));
+            if (missingSkus.length) {
+                throw new common_1.BadRequestException(`SKUs AWS solicitados não encontrados ou incompatíveis: ${missingSkus.join(', ')}`);
+            }
         }
         return {
             provider: 'AWS',

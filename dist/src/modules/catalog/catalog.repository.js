@@ -35,6 +35,7 @@ let CatalogRepository = class CatalogRepository {
             where: {
                 provider: params.provider,
                 active: true,
+                ...catalogSourceFilter(),
                 ...(params.region ? { region: params.region } : {}),
                 OR: [
                     ...(params.nativeSkuName
@@ -46,6 +47,7 @@ let CatalogRepository = class CatalogRepository {
                 ],
             },
             include: { service: true },
+            orderBy: { sourceKey: 'asc' },
         });
         return offering ? toOfferingView(offering) : null;
     }
@@ -56,6 +58,7 @@ let CatalogRepository = class CatalogRepository {
             where: {
                 provider: params.provider,
                 active: true,
+                ...catalogSourceFilter(),
                 ...(params.region ? { region: params.region } : {}),
                 ...(params.nativeSkuName
                     ? { nativeSkuName: { equals: params.nativeSkuName, mode: 'insensitive' } }
@@ -72,6 +75,7 @@ let CatalogRepository = class CatalogRepository {
                 },
             },
             include: { service: true },
+            orderBy: { sourceKey: 'asc' },
         });
         return offering ? toOfferingView(offering) : null;
     }
@@ -80,6 +84,7 @@ let CatalogRepository = class CatalogRepository {
             where: {
                 provider: params.provider,
                 active: true,
+                ...catalogSourceFilter(),
                 purchaseOption: 'ON_DEMAND',
                 service: { resourceKind: client_1.ResourceKind.COMPUTE_VM },
                 vcpu: { gte: new client_1.Prisma.Decimal(params.minimumVcpu) },
@@ -102,6 +107,7 @@ let CatalogRepository = class CatalogRepository {
             where: {
                 provider: params.provider,
                 active: true,
+                ...catalogSourceFilter(),
                 purchaseOption: 'ON_DEMAND',
                 region: params.region,
                 service: { resourceKind: params.resourceKind },
@@ -157,9 +163,16 @@ exports.CatalogRepository = CatalogRepository = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService])
 ], CatalogRepository);
+function catalogSourceFilter() {
+    if (process.env.CATALOG_ALLOW_TEST_FIXTURES?.toLowerCase() === 'true') {
+        return {};
+    }
+    return { NOT: { sourceKey: { startsWith: 'TEST:' } } };
+}
 function toOfferingView(offering) {
     return {
         id: offering.id,
+        sourceKey: offering.sourceKey,
         provider: offering.provider,
         resourceKind: offering.service.resourceKind,
         serviceName: offering.service.name,

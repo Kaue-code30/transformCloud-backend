@@ -104,24 +104,22 @@ O status HTTP já foi enviado quando o stream começa. Por isso, erros ocorridos
 
 ## Teste validado
 
-O cenário sintético documentado em `AI/MODULES/CATALOG.md` foi executado com sucesso em 2026-09-25:
+Em 2026-10-05, o CSV AWS com preços públicos reais foi processado pelo frontend e pelo backend. O evento final `done` confirmou:
 
-- origem AWS `m7g.2xlarge`, 730 horas e USD 1.000 de custo atual;
-- GCP `t2a-standard-8`: USD 547,50;
-- Azure `Standard_D8ps_v5`: USD 620,50;
-- cobertura verificada: 100%;
-- recomendação: GCP;
-- economia mensal: USD 452,50;
-- payback: 7 meses;
-- evento final `done` recebido.
+- seis serviços analisados e seis com pelo menos uma alternativa oficial verificada;
+- 100% do custo coberto por alguma alternativa;
+- GCP e Azure verificados nos seis serviços;
+- OCI verificada em EC2, RDS, S3, Lambda e Data Transfer;
+- CloudWatch Logs → OCI mantido como `not_found`, pois a lista pública da OCI cobra armazenamento em `GB-mês`, não ingestão em `GB`;
+- recomendação OCI baseada em preços oficiais, com 92% do custo coberto nesse provedor.
 
-`awsStatus: not_found` é esperado nesse cenário porque AWS é a origem e não é ranqueada como destino. OCI também fica `not_found` porque a fixture não contém oferta OCI.
+`awsStatus: not_found` é esperado porque AWS é a origem e não participa do ranking de destino.
 
 ## Limites atuais
 
 - O cenário validado cobre `COMPUTE_VM`, `MANAGED_POSTGRES`, `OBJECT_STORAGE`, `SERVERLESS_FUNCTION`, `OBSERVABILITY_LOGS` e `DATA_TRANSFER`.
 - Um serviço não pode reutilizar a estratégia de outro `resourceKind`.
-- Os snapshots `*-multiservice-demo.json` são fixtures explícitas de teste; produção ainda requer importadores das fontes oficiais de preço.
+- Os quatro provedores têm sincronizadores oficiais. Fixtures `TEST:*` só entram no matching quando `CATALOG_ALLOW_TEST_FIXTURES=true`.
 - O parser do frontend precisa de colunas nativas suficientes; dados ambíguos devem ser rejeitados ou marcados como parciais.
 - `migrationCost` ainda usa a heurística `totalCost × 3`.
 - O backend não converte moedas.

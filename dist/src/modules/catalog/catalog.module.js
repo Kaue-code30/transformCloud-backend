@@ -13,15 +13,33 @@ const catalog_repository_1 = require("./catalog.repository");
 const catalog_import_service_1 = require("./catalog-import.service");
 const catalog_pricing_service_1 = require("./catalog-pricing.service");
 const aws_catalog_adapter_1 = require("./providers/aws/aws-catalog.adapter");
+const azure_catalog_adapter_1 = require("./providers/azure/azure-catalog.adapter");
 const gcp_catalog_adapter_1 = require("./providers/gcp/gcp-catalog.adapter");
+const oci_catalog_adapter_1 = require("./providers/oci/oci-catalog.adapter");
 let CatalogModule = class CatalogModule {
 };
 exports.CatalogModule = CatalogModule;
 exports.CatalogModule = CatalogModule = __decorate([
     (0, common_1.Module)({
         imports: [prisma_module_1.PrismaModule],
-        providers: [catalog_repository_1.CatalogRepository, catalog_import_service_1.CatalogImportService, catalog_pricing_service_1.CatalogPricingService, aws_catalog_adapter_1.AwsCatalogAdapter, gcp_catalog_adapter_1.GcpCatalogAdapter],
-        exports: [catalog_repository_1.CatalogRepository, catalog_import_service_1.CatalogImportService, catalog_pricing_service_1.CatalogPricingService, aws_catalog_adapter_1.AwsCatalogAdapter, gcp_catalog_adapter_1.GcpCatalogAdapter],
+        providers: [
+            catalog_repository_1.CatalogRepository,
+            catalog_import_service_1.CatalogImportService,
+            catalog_pricing_service_1.CatalogPricingService,
+            aws_catalog_adapter_1.AwsCatalogAdapter,
+            azure_catalog_adapter_1.AzureCatalogAdapter,
+            gcp_catalog_adapter_1.GcpCatalogAdapter,
+            oci_catalog_adapter_1.OciCatalogAdapter,
+        ],
+        exports: [
+            catalog_repository_1.CatalogRepository,
+            catalog_import_service_1.CatalogImportService,
+            catalog_pricing_service_1.CatalogPricingService,
+            aws_catalog_adapter_1.AwsCatalogAdapter,
+            azure_catalog_adapter_1.AzureCatalogAdapter,
+            gcp_catalog_adapter_1.GcpCatalogAdapter,
+            oci_catalog_adapter_1.OciCatalogAdapter,
+        ],
     })
 ], CatalogModule);
 //# sourceMappingURL=catalog.module.js.map

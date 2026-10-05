@@ -1,6 +1,6 @@
 # TransformCloud Backend — Contexto do projeto
 
-> Atualizado em: 2026-09-25
+> Atualizado em: 2026-10-05
 
 ## Objetivo
 
@@ -27,8 +27,8 @@ No Prisma 7, a URL do banco fica em `prisma.config.ts`, não no bloco `datasourc
 |---|---|---|
 | `auth` | cadastro, login, refresh, logout e recuperação de senha | completo |
 | `users` | perfil e troca de senha | completo |
-| `catalog` | serviços, ofertas, medidores, preços, overrides e importação | compute implementado |
-| `billing` | pipeline SSE de matching, preço, ranking e payback | compute validado |
+| `catalog` | serviços, ofertas, medidores, preços, overrides e importação | AWS/GCP/Azure/OCI oficiais |
+| `billing` | pipeline SSE de matching, preço, ranking e payback | seis categorias validadas |
 | `integrations` | integrações futuras | scaffold |
 | `migrations` | automação de migração futura | scaffold |
 | `observability` | telemetria futura | scaffold |
@@ -38,6 +38,7 @@ No Prisma 7, a URL do banco fica em `prisma.config.ts`, não no bloco `datasourc
 ```text
 src/
 ├── commands/import-catalog.ts
+├── commands/sync-{aws,gcp,azure,oci}-catalog.ts
 ├── modules/catalog/
 │   ├── catalog-import.service.ts
 │   ├── catalog-pricing.service.ts
@@ -98,9 +99,15 @@ PORT=3001
 
 # Opcional: somente para melhorar a redação da recomendação
 ANTHROPIC_API_KEY=""
+
+# Necessária apenas no comando catalog:sync:gcp
+GCP_API_KEY=""
+
+# Padrão false; habilite somente para cenários sintéticos locais
+CATALOG_ALLOW_TEST_FIXTURES="false"
 ```
 
-As antigas chaves de APIs públicas de preço não são necessárias para o pipeline novo; os valores são importados no catálogo.
+A análise nunca consulta APIs de preço. Os comandos de sincronização importam os valores no catálogo local; apenas o GCP exige chave de API.
 
 ## Execução local
 
@@ -117,8 +124,8 @@ O teste ponta a ponta está descrito em `AI/MODULES/CATALOG.md#teste-local-repro
 
 ## Próximas etapas
 
-1. Adaptadores oficiais de catálogo AWS, GCP, Azure e OCI.
-2. Matchers para banco, storage, cache, Kubernetes e rede.
-3. Fluxo administrativo para revisar `MappingOverride`.
-4. Política de atualização e expiração dos snapshots.
-5. Testes de integração do importador com PostgreSQL isolado.
+1. Agendar atualização e expiração dos snapshots oficiais.
+2. Adicionar cache, Kubernetes, load balancer e WAF ao catálogo.
+3. Criar fluxo administrativo para revisar `MappingOverride`.
+4. Importar preços contratuais separadamente dos preços públicos.
+5. Adicionar testes de integração do importador com PostgreSQL isolado.

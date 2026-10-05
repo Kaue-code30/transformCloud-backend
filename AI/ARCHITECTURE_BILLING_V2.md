@@ -1,6 +1,6 @@
 # Arquitetura de Billing V2 — Backend
 
-> Atualizado em: 2026-09-25
+> Atualizado em: 2026-10-05
 
 ## Princípio
 
@@ -98,11 +98,12 @@ Eventos: `mapping`, `pricing`, `classification`, `recommendation`, `done` e `err
 
 ## Estado atual
 
-- `COMPUTE_VM`: matching, preço e teste ponta a ponta validados.
-- Bancos, storage, cache, Kubernetes, balanceadores, WAF e transferência: modelos previstos, matchers pendentes.
-- Adaptadores de fontes oficiais: pendentes.
+- `COMPUTE_VM`, `MANAGED_POSTGRES`, `OBJECT_STORAGE`, `SERVERLESS_FUNCTION`, `OBSERVABILITY_LOGS` e `DATA_TRANSFER`: matching e preço validados ponta a ponta.
+- AWS, GCP, Azure e OCI: adapters oficiais implementados e persistidos no catálogo local.
+- Cache, Kubernetes, balanceadores e WAF: modelos previstos, matchers e sincronizações específicas pendentes.
+- Fixtures `TEST:*`: excluídas por padrão e habilitadas somente com `CATALOG_ALLOW_TEST_FIXTURES=true`.
 - Override manual: persistência e leitura implementadas; interface administrativa pendente.
 
 ## Teste de referência
 
-As fixtures em `test/fixtures` validam AWS `m7g.2xlarge` contra GCP `t2a-standard-8` e Azure `Standard_D8ps_v5`. Consulte `AI/MODULES/CATALOG.md` para comandos e valores esperados.
+O teste oficial usa `test/fixtures/billing/aws-sa-east-1-real-prices-2026-09.csv`. As fixtures sintéticas continuam disponíveis para testes unitários e cenários offline. Consulte `AI/MODULES/CATALOG.md` para comandos, fontes e limitações.

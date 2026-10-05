@@ -34,4 +34,70 @@ describe('GcpCatalogAdapter', () => {
       ],
     });
   });
+
+  it('compõe CPU e memória em uma oferta de máquina', () => {
+    const service = {
+      name: 'services/6F81-5844-456A',
+      serviceId: '6F81-5844-456A',
+      displayName: 'Compute Engine',
+    };
+    const makeSku = (skuId: string, description: string, usageUnit: string) => ({
+      name: `services/6F81-5844-456A/skus/${skuId}`,
+      skuId,
+      description,
+      serviceRegions: ['southamerica-east1'],
+      category: {
+        serviceDisplayName: 'Compute Engine',
+        resourceFamily: 'Compute',
+        resourceGroup: description.includes('Core') ? 'CPU' : 'RAM',
+        usageType: 'OnDemand',
+      },
+      pricingInfo: [{
+        effectiveTime: '2026-10-01T00:00:00Z',
+        pricingExpression: {
+          usageUnit,
+          tieredRates: [{
+            startUsageAmount: 0,
+            unitPrice: {
+              currencyCode: 'USD',
+              units: '0',
+              nanos: 10_000_000,
+            },
+          }],
+        },
+      }],
+    });
+    const adapter = new GcpCatalogAdapter();
+    const skus = [
+      makeSku('cpu-sku', 'T2A Instance Core', 'h'),
+      makeSku('ram-sku', 'T2A Instance Ram', 'GiBy.h'),
+    ];
+    const snapshot = adapter.toSnapshot(
+      service,
+      skus,
+      {
+        service: 'Compute Engine',
+        region: 'southamerica-east1',
+        skuIds: ['cpu-sku', 'ram-sku'],
+        offeringName: 't2a-standard-8',
+        vcpu: 8,
+        memoryGiB: 32,
+        architecture: 'arm64',
+      },
+    );
+
+    expect(snapshot.offerings).toHaveLength(1);
+    expect(snapshot.meters).toHaveLength(2);
+    expect(snapshot.offeringMeters.map((item) => item.quantity)).toEqual([
+      8, 32,
+    ]);
+    expect(() =>
+      adapter.toSnapshot(service, [skus[0]], {
+        service: 'Compute Engine',
+        region: 'southamerica-east1',
+        skuIds: ['cpu-sku', 'ram-sku'],
+        offeringName: 't2a-standard-8',
+      }),
+    ).toThrow('SKUs GCP solicitados');
+  });
 });

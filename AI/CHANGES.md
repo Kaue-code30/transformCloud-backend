@@ -5,6 +5,24 @@
 
 ---
 
+## [2026-10-05] — Catálogos oficiais Azure/OCI e cobertura multicloud real
+
+**Objetivo:** concluir as integrações oficiais e impedir que fixtures sintéticas apareçam como preços verificados no fluxo normal.
+
+**Implementado:**
+- Adapters e comandos `catalog:sync:azure` e `catalog:sync:oci`, com paginação, tiers, unidades, multiplicadores, vigência e payload bruto.
+- Azure Retail Prices API com filtros exatos de produto, medidor, SKU e ARM SKU.
+- OCI Public Price List API com seleção exata por part numbers e composição OCPU/memória.
+- GCP com ofertas compostas, quantidades de CPU/RAM, varredura de catálogos grandes e seleção exata por `skuId`.
+- AWS com seleção exata por SKU de produto.
+- Falha explícita quando um SKU/part number solicitado não é encontrado, evitando importações compostas incompletas.
+- Fixtures `TEST:*` excluídas do matching por padrão; uso local exige `CATALOG_ALLOW_TEST_FIXTURES=true`.
+- Ranking prioriza fontes oficiais e não trata arquitetura/SO do host como requisito de equivalência para banco gerenciado.
+
+**Sincronização real:** ofertas oficiais importadas para EC2/VM, PostgreSQL, object storage, funções, logs e transferência em AWS, GCP, Azure e OCI. Fontes persistidas: `AWS_PRICE_LIST_BULK_API`, `GCP_CLOUD_BILLING_CATALOG_API`, `AZURE_RETAIL_PRICES_API` e `OCI_PUBLIC_PRICE_LIST_API`.
+
+**Validação:** TypeScript sem erros, 8 suítes/14 testes passando e build NestJS concluído. O CSV real de seis serviços terminou com HTTP 200, evento `done`, 6/6 serviços com alternativa oficial, 100% do custo coberto por ao menos um destino e recomendação OCI com 92% de cobertura própria. CloudWatch Logs → OCI permanece corretamente `not_found`, pois o medidor oficial OCI é armazenamento em `GB-mês`, não ingestão em `GB`.
+
 ## [2026-09-25] — Sincronizador oficial GCP
 
 **Objetivo:** normalizar o Cloud Billing Catalog API no catálogo interno.

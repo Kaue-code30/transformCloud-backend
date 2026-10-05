@@ -1,4 +1,4 @@
-import type { CatalogSnapshot } from '../../catalog.types';
+import type { CatalogResourceKind, CatalogSnapshot } from '../../catalog.types';
 interface GcpMoney {
     currencyCode?: string;
     units?: string;
@@ -41,7 +41,16 @@ export interface GcpCatalogSyncOptions {
     service: string;
     region: string;
     match?: string;
+    skuIds?: string[];
     maxSkus?: number;
+    maxScanSkus?: number;
+    resourceKind?: CatalogResourceKind;
+    offeringName?: string;
+    vcpu?: number;
+    memoryGiB?: number;
+    operatingSystem?: string;
+    architecture?: string;
+    engine?: string;
 }
 export declare class GcpCatalogAdapter {
     private readonly baseUrl;

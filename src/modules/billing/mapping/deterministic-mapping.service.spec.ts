@@ -91,6 +91,8 @@ describe('DeterministicMappingService', () => {
       nativeSkuName: 'db-custom-2-16384',
       region: 'southamerica-east1',
       engine: 'PostgreSQL',
+      architecture: null,
+      operatingSystem: null,
       vcpu: 2,
       memoryGiB: 16,
     });
@@ -208,6 +210,77 @@ describe('DeterministicMappingService', () => {
     expect(result.unmapped[0].reason).toContain('estratégia determinística');
     expect(findComputeCandidates).not.toHaveBeenCalled();
   });
+
+  it('prioriza catálogo oficial quando existe um fixture equivalente', async () => {
+    const source = offering({
+      provider: 'AWS',
+      resourceKind: 'OBJECT_STORAGE',
+      serviceName: 'Amazon S3',
+      serviceNativeCode: 'AmazonS3',
+      nativeSkuName: 'S3 Standard',
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const fixture = offering({
+      id: 'gcp-fixture',
+      sourceKey: 'TEST:GCP:storage',
+      provider: 'GCP',
+      resourceKind: 'OBJECT_STORAGE',
+      serviceName: 'Cloud Storage',
+      nativeSkuName: 'Standard-Regional',
+      region: 'southamerica-east1',
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const official = offering({
+      id: 'gcp-official',
+      sourceKey: 'GCP_CATALOG:COMPOSITE:storage',
+      provider: 'GCP',
+      resourceKind: 'OBJECT_STORAGE',
+      serviceName: 'Cloud Storage',
+      nativeSkuName: 'standard-storage-saopaulo',
+      region: 'southamerica-east1',
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(source),
+      findOfferingByNativeIdentity: jest.fn(),
+      findApprovedOverride: jest.fn().mockResolvedValue(null),
+      findResourceCandidates: jest.fn().mockImplementation(({ provider }) =>
+        Promise.resolve(provider === 'GCP' ? [fixture, official] : []),
+      ),
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 's3-line',
+      name: 'Amazon S3',
+      specs: 'Standard storage',
+      quantity: '100 GB-Mo',
+      cost: 10,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 's3-line',
+      provider: 'AWS',
+      serviceCode: 'AmazonS3',
+      serviceName: 'Amazon S3',
+      skuId: 's3-standard',
+      region: 'sa-east-1',
+      quantity: 100,
+      unit: 'GB-Mo',
+      cost: 10,
+      currency: 'USD',
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].gcp).toMatchObject({
+      catalogOfferingId: 'gcp-official',
+      machineType: 'standard-storage-saopaulo',
+    });
+  });
 });
 
 function billing(): ParsedBilling {
@@ -237,6 +310,7 @@ function offering(
 ): CatalogOfferingView {
   return {
     id: 'offering',
+    sourceKey: 'TEST:offering',
     provider: 'AWS',
     resourceKind: 'COMPUTE_VM',
     serviceName: 'Amazon EC2',

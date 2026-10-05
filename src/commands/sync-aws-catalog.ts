@@ -10,7 +10,7 @@ async function bootstrap() {
     return [key, value.join('=')];
   }));
   if (!args.service || !args.region) {
-    throw new Error('Uso: npm run catalog:sync:aws -- --service=AmazonEC2 --region=sa-east-1 [--match=m7g.2xlarge] [--max=100]');
+    throw new Error('Uso: npm run catalog:sync:aws -- --service=AmazonEC2 --region=sa-east-1 [--match=m7g.2xlarge] [--skus=SKU1,SKU2] [--max=100]');
   }
   const app = await NestFactory.createApplicationContext(CatalogModule);
   try {
@@ -20,6 +20,9 @@ async function bootstrap() {
       serviceCode: args.service,
       region: args.region,
       match: args.match || undefined,
+      productSkus: args.skus
+        ? args.skus.split(',').map((sku) => sku.trim()).filter(Boolean)
+        : undefined,
       maxProducts: args.max ? Number(args.max) : 500,
     });
     const result = await importer.importSnapshot(snapshot);

@@ -94,6 +94,7 @@ export interface CatalogSnapshot {
 
 export interface CatalogOfferingView {
   id: string;
+  sourceKey: string;
   provider: CatalogProvider;
   resourceKind: CatalogResourceKind;
   serviceName: string;

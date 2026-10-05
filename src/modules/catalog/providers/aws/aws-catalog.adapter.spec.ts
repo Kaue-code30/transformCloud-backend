@@ -42,7 +42,7 @@ describe('AwsCatalogAdapter', () => {
     }, {
       serviceCode: 'AmazonEC2',
       region: 'sa-east-1',
-      match: 'm7g.2xlarge',
+      productSkus: ['SKU1'],
     });
 
     expect(snapshot.source).toBe('AWS_PRICE_LIST_BULK_API');
@@ -60,5 +60,12 @@ describe('AwsCatalogAdapter', () => {
       currency: 'USD',
       tiers: [{ startQuantity: 0, unitPrice: 1.2345 }],
     });
+    expect(() =>
+      adapter.toSnapshot({ products: {}, terms: { OnDemand: {} } }, {
+        serviceCode: 'AmazonEC2',
+        region: 'sa-east-1',
+        productSkus: ['MISSING'],
+      }),
+    ).toThrow('Nenhuma oferta compatível');
   });
 });

@@ -327,6 +327,9 @@ function scoreResource(source: SourceResourceSpecs, target: CatalogOfferingView)
   if (source.vcpu == null || source.memoryGiB == null) return 0;
   const cpuDelta = Math.abs((target.vcpu ?? source.vcpu) - source.vcpu) / source.vcpu;
   const memoryDelta = Math.abs((target.memoryGiB ?? source.memoryGiB) - source.memoryGiB) / source.memoryGiB;
+  if (source.resourceKind !== 'COMPUTE_VM') {
+    return cpuDelta * 0.5 + memoryDelta * 0.5;
+  }
   const architecturePenalty =
     source.architecture == null
       ? 0.5
@@ -345,9 +348,12 @@ function scoreResource(source: SourceResourceSpecs, target: CatalogOfferingView)
 function lifecyclePenalty(offering: CatalogOfferingView): number {
   const name = offering.nativeSkuName.toLowerCase();
   const displayName = offering.displayName.toLowerCase();
-  return (name.includes('min-instance') ? 10 : 0) +
+  const serviceName = offering.serviceName.toLowerCase();
+  return (offering.sourceKey.toLowerCase().startsWith('test:') ? 50 : 0) +
+    (name.includes('min-instance') ? 10 : 0) +
     (name.includes('1st gen') ? 5 : 0) +
     (displayName.includes('fixture') ? 50 : 0) +
+    (offering.resourceKind === 'DATA_TRANSFER' && serviceName.includes('function') ? 10 : 0) +
     (name.includes('deprecated') ? 100 : 0);
 }
 

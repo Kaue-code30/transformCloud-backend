@@ -44,6 +44,7 @@ export class CatalogRepository {
       where: {
         provider: params.provider as CloudProvider,
         active: true,
+        ...catalogSourceFilter(),
         ...(params.region ? { region: params.region } : {}),
         OR: [
           ...(params.nativeSkuName
@@ -55,6 +56,7 @@ export class CatalogRepository {
         ],
       },
       include: { service: true },
+      orderBy: { sourceKey: 'asc' },
     });
 
     return offering ? toOfferingView(offering) : null;
@@ -73,6 +75,7 @@ export class CatalogRepository {
       where: {
         provider: params.provider as CloudProvider,
         active: true,
+        ...catalogSourceFilter(),
         ...(params.region ? { region: params.region } : {}),
         ...(params.nativeSkuName
           ? { nativeSkuName: { equals: params.nativeSkuName, mode: 'insensitive' } }
@@ -89,6 +92,7 @@ export class CatalogRepository {
         },
       },
       include: { service: true },
+      orderBy: { sourceKey: 'asc' },
     });
 
     return offering ? toOfferingView(offering) : null;
@@ -106,6 +110,7 @@ export class CatalogRepository {
       where: {
         provider: params.provider as CloudProvider,
         active: true,
+        ...catalogSourceFilter(),
         purchaseOption: 'ON_DEMAND',
         service: { resourceKind: ResourceKind.COMPUTE_VM },
         vcpu: { gte: new Prisma.Decimal(params.minimumVcpu) },
@@ -138,6 +143,7 @@ export class CatalogRepository {
       where: {
         provider: params.provider as CloudProvider,
         active: true,
+        ...catalogSourceFilter(),
         purchaseOption: 'ON_DEMAND',
         region: params.region,
         service: { resourceKind: params.resourceKind as ResourceKind },
@@ -199,11 +205,19 @@ export class CatalogRepository {
   }
 }
 
+function catalogSourceFilter(): Prisma.ProviderOfferingWhereInput {
+  if (process.env.CATALOG_ALLOW_TEST_FIXTURES?.toLowerCase() === 'true') {
+    return {};
+  }
+  return { NOT: { sourceKey: { startsWith: 'TEST:' } } };
+}
+
 function toOfferingView(
   offering: Prisma.ProviderOfferingGetPayload<{ include: { service: true } }>,
 ): CatalogOfferingView {
   return {
     id: offering.id,
+    sourceKey: offering.sourceKey,
     provider: offering.provider as CatalogProvider,
     resourceKind: offering.service.resourceKind as CatalogResourceKind,
     serviceName: offering.service.name,
