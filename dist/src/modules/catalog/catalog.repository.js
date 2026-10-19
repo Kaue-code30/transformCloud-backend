@@ -83,54 +83,84 @@ let CatalogRepository = class CatalogRepository {
         return offering ? toOfferingView(offering) : null;
     }
     async findComputeCandidates(params) {
-        const offerings = await this.prisma.providerOffering.findMany({
+        const baseWhere = {
+            provider: params.provider,
+            active: true,
+            ...catalogSourceFilter(),
+            purchaseOption: 'ON_DEMAND',
+            service: { resourceKind: client_1.ResourceKind.COMPUTE_VM },
+            vcpu: { gte: new client_1.Prisma.Decimal(params.minimumVcpu) },
+            memoryGiB: { gte: new client_1.Prisma.Decimal(params.minimumMemoryGiB) },
+            ...(params.operatingSystem
+                ? { operatingSystem: { equals: params.operatingSystem, mode: 'insensitive' } }
+                : {}),
+            ...(params.architecture
+                ? { architecture: { equals: params.architecture, mode: 'insensitive' } }
+                : {}),
+        };
+        let offerings = await this.prisma.providerOffering.findMany({
             where: {
-                provider: params.provider,
-                active: true,
-                ...catalogSourceFilter(),
-                purchaseOption: 'ON_DEMAND',
-                service: { resourceKind: client_1.ResourceKind.COMPUTE_VM },
-                vcpu: { gte: new client_1.Prisma.Decimal(params.minimumVcpu) },
-                memoryGiB: { gte: new client_1.Prisma.Decimal(params.minimumMemoryGiB) },
+                ...baseWhere,
                 ...(params.region ? { region: params.region } : {}),
-                ...(params.operatingSystem
-                    ? { operatingSystem: { equals: params.operatingSystem, mode: 'insensitive' } }
-                    : {}),
-                ...(params.architecture
-                    ? { architecture: { equals: params.architecture, mode: 'insensitive' } }
-                    : {}),
             },
             include: { service: true },
             take: 500,
         });
-        return offerings.map(toOfferingView);
+        let regionOverride;
+        if (!offerings.length && params.provider === 'OCI' && params.region) {
+            offerings = await this.prisma.providerOffering.findMany({
+                where: {
+                    ...baseWhere,
+                    attributes: { path: ['globalListPrice'], equals: true },
+                },
+                include: { service: true },
+                take: 500,
+            });
+            regionOverride = params.region;
+        }
+        return offerings.map((offering) => toOfferingView(offering, regionOverride));
     }
     async findResourceCandidates(params) {
-        const offerings = await this.prisma.providerOffering.findMany({
+        const baseWhere = {
+            provider: params.provider,
+            active: true,
+            ...catalogSourceFilter(),
+            purchaseOption: 'ON_DEMAND',
+            service: { resourceKind: params.resourceKind },
+            ...(params.pricingUnits?.length
+                ? { meters: { some: { meter: { pricingUnit: { in: params.pricingUnits } } } } }
+                : {}),
+            ...(params.engine
+                ? { engine: { equals: params.engine, mode: 'insensitive' } }
+                : {}),
+            ...(params.minimumVcpu
+                ? { vcpu: { gte: new client_1.Prisma.Decimal(params.minimumVcpu) } }
+                : {}),
+            ...(params.minimumMemoryGiB
+                ? { memoryGiB: { gte: new client_1.Prisma.Decimal(params.minimumMemoryGiB) } }
+                : {}),
+        };
+        let offerings = await this.prisma.providerOffering.findMany({
             where: {
-                provider: params.provider,
-                active: true,
-                ...catalogSourceFilter(),
-                purchaseOption: 'ON_DEMAND',
+                ...baseWhere,
                 region: params.region,
-                service: { resourceKind: params.resourceKind },
-                ...(params.pricingUnits?.length
-                    ? { meters: { some: { meter: { pricingUnit: { in: params.pricingUnits } } } } }
-                    : {}),
-                ...(params.engine
-                    ? { engine: { equals: params.engine, mode: 'insensitive' } }
-                    : {}),
-                ...(params.minimumVcpu
-                    ? { vcpu: { gte: new client_1.Prisma.Decimal(params.minimumVcpu) } }
-                    : {}),
-                ...(params.minimumMemoryGiB
-                    ? { memoryGiB: { gte: new client_1.Prisma.Decimal(params.minimumMemoryGiB) } }
-                    : {}),
             },
             include: { service: true },
             take: 500,
         });
-        return offerings.map(toOfferingView);
+        let regionOverride;
+        if (!offerings.length && params.provider === 'OCI') {
+            offerings = await this.prisma.providerOffering.findMany({
+                where: {
+                    ...baseWhere,
+                    attributes: { path: ['globalListPrice'], equals: true },
+                },
+                include: { service: true },
+                take: 500,
+            });
+            regionOverride = params.region;
+        }
+        return offerings.map((offering) => toOfferingView(offering, regionOverride));
     }
     async findApprovedOverride(sourceOfferingId, targetProvider) {
         const override = await this.prisma.mappingOverride.findFirst({
@@ -172,7 +202,7 @@ function catalogSourceFilter() {
     }
     return { NOT: { sourceKey: { startsWith: 'TEST:' } } };
 }
-function toOfferingView(offering) {
+function toOfferingView(offering, regionOverride) {
     return {
         id: offering.id,
         sourceKey: offering.sourceKey,
@@ -183,7 +213,7 @@ function toOfferingView(offering) {
         nativeProductId: offering.nativeProductId,
         nativeSkuName: offering.nativeSkuName,
         displayName: offering.displayName,
-        region: offering.region,
+        region: regionOverride ?? offering.region,
         purchaseOption: offering.purchaseOption,
         operatingSystem: offering.operatingSystem,
         architecture: offering.architecture,

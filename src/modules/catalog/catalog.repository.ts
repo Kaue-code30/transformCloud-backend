@@ -110,28 +110,44 @@ export class CatalogRepository {
     minimumVcpu: number;
     minimumMemoryGiB: number;
   }): Promise<CatalogOfferingView[]> {
-    const offerings = await this.prisma.providerOffering.findMany({
+    const baseWhere: Prisma.ProviderOfferingWhereInput = {
+      provider: params.provider as CloudProvider,
+      active: true,
+      ...catalogSourceFilter(),
+      purchaseOption: 'ON_DEMAND',
+      service: { resourceKind: ResourceKind.COMPUTE_VM },
+      vcpu: { gte: new Prisma.Decimal(params.minimumVcpu) },
+      memoryGiB: { gte: new Prisma.Decimal(params.minimumMemoryGiB) },
+      ...(params.operatingSystem
+        ? { operatingSystem: { equals: params.operatingSystem, mode: 'insensitive' } }
+        : {}),
+      ...(params.architecture
+        ? { architecture: { equals: params.architecture, mode: 'insensitive' } }
+        : {}),
+    };
+    let offerings = await this.prisma.providerOffering.findMany({
       where: {
-        provider: params.provider as CloudProvider,
-        active: true,
-        ...catalogSourceFilter(),
-        purchaseOption: 'ON_DEMAND',
-        service: { resourceKind: ResourceKind.COMPUTE_VM },
-        vcpu: { gte: new Prisma.Decimal(params.minimumVcpu) },
-        memoryGiB: { gte: new Prisma.Decimal(params.minimumMemoryGiB) },
+        ...baseWhere,
         ...(params.region ? { region: params.region } : {}),
-        ...(params.operatingSystem
-          ? { operatingSystem: { equals: params.operatingSystem, mode: 'insensitive' } }
-          : {}),
-        ...(params.architecture
-          ? { architecture: { equals: params.architecture, mode: 'insensitive' } }
-          : {}),
       },
       include: { service: true },
       take: 500,
     });
 
-    return offerings.map(toOfferingView);
+    let regionOverride: string | undefined;
+    if (!offerings.length && params.provider === 'OCI' && params.region) {
+      offerings = await this.prisma.providerOffering.findMany({
+        where: {
+          ...baseWhere,
+          attributes: { path: ['globalListPrice'], equals: true },
+        },
+        include: { service: true },
+        take: 500,
+      });
+      regionOverride = params.region;
+    }
+
+    return offerings.map((offering) => toOfferingView(offering, regionOverride));
   }
 
   async findResourceCandidates(params: {
@@ -143,32 +159,48 @@ export class CatalogRepository {
     minimumMemoryGiB?: number | null;
     pricingUnits?: string[];
   }): Promise<CatalogOfferingView[]> {
-    const offerings = await this.prisma.providerOffering.findMany({
+    const baseWhere: Prisma.ProviderOfferingWhereInput = {
+      provider: params.provider as CloudProvider,
+      active: true,
+      ...catalogSourceFilter(),
+      purchaseOption: 'ON_DEMAND',
+      service: { resourceKind: params.resourceKind as ResourceKind },
+      ...(params.pricingUnits?.length
+        ? { meters: { some: { meter: { pricingUnit: { in: params.pricingUnits } } } } }
+        : {}),
+      ...(params.engine
+        ? { engine: { equals: params.engine, mode: 'insensitive' } }
+        : {}),
+      ...(params.minimumVcpu
+        ? { vcpu: { gte: new Prisma.Decimal(params.minimumVcpu) } }
+        : {}),
+      ...(params.minimumMemoryGiB
+        ? { memoryGiB: { gte: new Prisma.Decimal(params.minimumMemoryGiB) } }
+        : {}),
+    };
+    let offerings = await this.prisma.providerOffering.findMany({
       where: {
-        provider: params.provider as CloudProvider,
-        active: true,
-        ...catalogSourceFilter(),
-        purchaseOption: 'ON_DEMAND',
+        ...baseWhere,
         region: params.region,
-        service: { resourceKind: params.resourceKind as ResourceKind },
-        ...(params.pricingUnits?.length
-          ? { meters: { some: { meter: { pricingUnit: { in: params.pricingUnits } } } } }
-          : {}),
-        ...(params.engine
-          ? { engine: { equals: params.engine, mode: 'insensitive' } }
-          : {}),
-        ...(params.minimumVcpu
-          ? { vcpu: { gte: new Prisma.Decimal(params.minimumVcpu) } }
-          : {}),
-        ...(params.minimumMemoryGiB
-          ? { memoryGiB: { gte: new Prisma.Decimal(params.minimumMemoryGiB) } }
-          : {}),
       },
       include: { service: true },
       take: 500,
     });
 
-    return offerings.map(toOfferingView);
+    let regionOverride: string | undefined;
+    if (!offerings.length && params.provider === 'OCI') {
+      offerings = await this.prisma.providerOffering.findMany({
+        where: {
+          ...baseWhere,
+          attributes: { path: ['globalListPrice'], equals: true },
+        },
+        include: { service: true },
+        take: 500,
+      });
+      regionOverride = params.region;
+    }
+
+    return offerings.map((offering) => toOfferingView(offering, regionOverride));
   }
 
   async findApprovedOverride(
@@ -218,6 +250,7 @@ function catalogSourceFilter(): Prisma.ProviderOfferingWhereInput {
 
 function toOfferingView(
   offering: Prisma.ProviderOfferingGetPayload<{ include: { service: true } }>,
+  regionOverride?: string,
 ): CatalogOfferingView {
   return {
     id: offering.id,
@@ -229,7 +262,7 @@ function toOfferingView(
     nativeProductId: offering.nativeProductId,
     nativeSkuName: offering.nativeSkuName,
     displayName: offering.displayName,
-    region: offering.region,
+    region: regionOverride ?? offering.region,
     purchaseOption: offering.purchaseOption,
     operatingSystem: offering.operatingSystem,
     architecture: offering.architecture,

@@ -195,6 +195,16 @@ function resourceKindFor(product) {
     if (text.includes('web application firewall') ||
         /\bwaf\b/.test(text))
         return 'WAF';
+    if (text.includes('oci queue') || text.includes('infrastructure queue')) {
+        return 'QUEUE';
+    }
+    if (text.includes('networking - dns'))
+        return 'DNS';
+    if (text.includes('storage - file storage') &&
+        !text.includes('lustre'))
+        return 'FILE_STORAGE';
+    if (text.includes('security - key management'))
+        return 'KEY_MANAGEMENT';
     if ((text.includes('cache') || text.includes('memorydb')) &&
         (text.includes('redis') || text.includes('valkey')))
         return 'REDIS_CACHE';
@@ -253,6 +263,11 @@ function normalizeOciUnit(metricName, kind) {
     }
     if (lower.includes('request') || lower.includes('invocation')) {
         return { unit: 'Requests', multiplier };
+    }
+    if (lower.includes('quer'))
+        return { unit: 'Requests', multiplier };
+    if (lower.includes('key version') && lower.includes('month')) {
+        return { unit: 'Key-Mo', multiplier };
     }
     if (lower.includes('hour'))
         return { unit: 'Hrs', multiplier };

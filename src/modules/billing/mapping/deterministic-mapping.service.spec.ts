@@ -251,6 +251,210 @@ describe('DeterministicMappingService', () => {
     expect(findResourceCandidates).not.toHaveBeenCalled();
   });
 
+  it('mapeia saída para internet independentemente do serviço AWS de origem', async () => {
+    const target = offering({
+      id: 'oci-internet-egress',
+      provider: 'OCI',
+      resourceKind: 'DATA_TRANSFER',
+      serviceName: 'OCI Data Transfer',
+      serviceNativeCode: 'OCI:DATA_TRANSFER:VCN',
+      nativeSkuName: 'Internet-Egress',
+      displayName: 'Internet Egress',
+      region: 'sa-saopaulo-1',
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const findResourceCandidates = jest.fn().mockImplementation(({ provider }) =>
+      Promise.resolve(provider === 'OCI' ? [target] : []),
+    );
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 'rds-egress',
+      name: 'Amazon RDS — DataTransfer-Out-Bytes',
+      specs: 'DataTransfer-Out-Bytes, us-east-1',
+      region: 'us-east-1',
+      quantity: '100 GB',
+      cost: 20,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 'rds-egress',
+      provider: 'AWS',
+      serviceCode: 'AmazonRDS',
+      serviceName: 'Amazon RDS',
+      usageType: 'DataTransfer-Out-Bytes',
+      region: 'us-east-1',
+      quantity: 100,
+      unit: 'GB',
+      cost: 20,
+      currency: 'USD',
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toMatchObject({
+      catalogOfferingId: 'oci-internet-egress',
+      confidence: 'high',
+    });
+    expect(findResourceCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceKind: 'DATA_TRANSFER' }),
+    );
+  });
+
+  it('não confunde tráfego inter-regional AWS com saída para internet', async () => {
+    const findResourceCandidates = jest.fn();
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 'inter-region',
+      name: 'Amazon EC2 — USE1-SAE1-AWS-Out-Bytes',
+      specs: 'USE1-SAE1-AWS-Out-Bytes, us-east-1',
+      region: 'us-east-1',
+      quantity: '100 GB',
+      cost: 20,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 'inter-region',
+      provider: 'AWS',
+      serviceCode: 'AmazonEC2',
+      serviceName: 'Amazon EC2',
+      usageType: 'USE1-SAE1-AWS-Out-Bytes',
+      region: 'us-east-1',
+      quantity: 100,
+      unit: 'GB',
+      cost: 20,
+      currency: 'USD',
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toBeUndefined();
+    expect(findResourceCandidates).not.toHaveBeenCalled();
+  });
+
+  it('não precifica S3 Infrequent Access como Object Storage Standard', async () => {
+    const standard = offering({
+      id: 'oci-object-standard',
+      provider: 'OCI',
+      resourceKind: 'OBJECT_STORAGE',
+      serviceName: 'OCI Object Storage',
+      serviceNativeCode: 'OCI:OBJECT_STORAGE',
+      nativeSkuName: 'Object-Storage-Standard',
+      displayName: 'Object Storage Standard',
+      region: 'sa-saopaulo-1',
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const findResourceCandidates = jest.fn().mockImplementation(({ provider }) =>
+      Promise.resolve(provider === 'OCI' ? [standard] : []),
+    );
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 's3-ia',
+      name: 'Amazon S3 — TimedStorage-SIA-ByteHrs',
+      specs: 'TimedStorage-SIA-ByteHrs, us-east-1',
+      region: 'us-east-1',
+      quantity: '100 GB-Mo',
+      cost: 10,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 's3-ia',
+      provider: 'AWS',
+      serviceCode: 'AmazonS3',
+      serviceName: 'Amazon S3',
+      usageType: 'TimedStorage-SIA-ByteHrs',
+      region: 'us-east-1',
+      quantity: 100,
+      unit: 'GB-Mo',
+      cost: 10,
+      currency: 'USD',
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toBeUndefined();
+  });
+
+  it.each([
+    ['Amazon Simple Queue Service', 'Requests-RBP', 'Requests', 'QUEUE'],
+    ['Amazon Route 53', 'DNS-Queries', 'Requests', 'DNS'],
+    ['AmazonEFS', 'TimedStorage-ByteHrs', 'GB-Mo', 'FILE_STORAGE'],
+    ['AWS Key Management Service', 'us-east-1-KMS-Keys', 'Key-Mo', 'KEY_MANAGEMENT'],
+  ] as const)(
+    'reconhece %s como %s com unidade compatível',
+    async (serviceCode, usageType, unit, resourceKind) => {
+      const target = offering({
+        id: `oci-${resourceKind.toLowerCase()}`,
+        provider: 'OCI',
+        resourceKind,
+        serviceName: `OCI ${resourceKind}`,
+        serviceNativeCode: `OCI:${resourceKind}`,
+        nativeSkuName: `OCI-${resourceKind}`,
+        displayName: `OCI ${resourceKind}`,
+        region: 'sa-saopaulo-1',
+        vcpu: null,
+        memoryGiB: null,
+      });
+      const findResourceCandidates = jest.fn().mockImplementation(({ provider }) =>
+        Promise.resolve(provider === 'OCI' ? [target] : []),
+      );
+      const catalog = {
+        findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+        findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+        findResourceCandidates,
+      } as unknown as CatalogRepository;
+      const service = new DeterministicMappingService(catalog);
+      const input = billing();
+      input.topServices[0] = {
+        sourceLineItemKey: 'new-kind',
+        name: `${serviceCode} — ${usageType}`,
+        specs: `${usageType}, us-east-1`,
+        region: 'us-east-1',
+        quantity: `100 ${unit}`,
+        cost: 10,
+        pct: 100,
+      };
+      input.lineItems = [{
+        sourceKey: 'new-kind',
+        provider: 'AWS',
+        serviceCode,
+        serviceName: serviceCode,
+        usageType,
+        region: 'us-east-1',
+        quantity: 100,
+        unit,
+        cost: 10,
+        currency: 'USD',
+      }];
+
+      const result = await service.mapServices(input);
+
+      expect(result.mappings[0].oci).toBeDefined();
+      expect(findResourceCandidates).toHaveBeenCalledWith(
+        expect.objectContaining({ resourceKind }),
+      );
+    },
+  );
+
   it('reconhece ElastiCache Redis e preserva o engine no de-para', async () => {
     const target = offering({
       id: 'oci-cache-redis',

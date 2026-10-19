@@ -1,5 +1,5 @@
 export type CatalogProvider = 'AWS' | 'GCP' | 'AZURE' | 'OCI';
-export type CatalogResourceKind = 'COMPUTE_VM' | 'MANAGED_POSTGRES' | 'MANAGED_MYSQL' | 'OBJECT_STORAGE' | 'BLOCK_STORAGE' | 'REDIS_CACHE' | 'KUBERNETES' | 'LOAD_BALANCER' | 'WAF' | 'DATA_TRANSFER' | 'SERVERLESS_FUNCTION' | 'OBSERVABILITY_LOGS';
+export type CatalogResourceKind = 'COMPUTE_VM' | 'MANAGED_POSTGRES' | 'MANAGED_MYSQL' | 'OBJECT_STORAGE' | 'BLOCK_STORAGE' | 'REDIS_CACHE' | 'KUBERNETES' | 'LOAD_BALANCER' | 'WAF' | 'DATA_TRANSFER' | 'SERVERLESS_FUNCTION' | 'OBSERVABILITY_LOGS' | 'QUEUE' | 'DNS' | 'FILE_STORAGE' | 'KEY_MANAGEMENT';
 export type CatalogPriceType = 'ON_DEMAND' | 'RESERVED' | 'SPOT' | 'SAVINGS_PLAN' | 'OTHER';
 export interface CatalogServiceInput {
     nativeCode: string;

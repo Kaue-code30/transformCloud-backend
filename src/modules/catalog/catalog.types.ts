@@ -12,7 +12,11 @@ export type CatalogResourceKind =
   | 'WAF'
   | 'DATA_TRANSFER'
   | 'SERVERLESS_FUNCTION'
-  | 'OBSERVABILITY_LOGS';
+  | 'OBSERVABILITY_LOGS'
+  | 'QUEUE'
+  | 'DNS'
+  | 'FILE_STORAGE'
+  | 'KEY_MANAGEMENT';
 
 export type CatalogPriceType =
   | 'ON_DEMAND'

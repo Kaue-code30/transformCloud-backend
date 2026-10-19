@@ -273,6 +273,7 @@ export class DeterministicMappingService {
     if (!candidates.length) return null;
 
     const ranked = candidates
+      .filter((offering) => isSemanticallyCompatible(source, offering))
       .map((offering) => {
         const score = scoreResource(source, offering);
         return {
@@ -282,6 +283,7 @@ export class DeterministicMappingService {
         };
       })
       .sort((a, b) => a.rankScore - b.rankScore || a.offering.nativeSkuName.localeCompare(b.offering.nativeSkuName));
+    if (!ranked.length) return null;
     const selected = ranked[0];
     const exactCapacity =
       source.vcpu != null &&
@@ -416,6 +418,36 @@ function semanticPenalty(
   return 0;
 }
 
+function isSemanticallyCompatible(
+  source: SourceResourceSpecs,
+  target: CatalogOfferingView,
+): boolean {
+  if (
+    source.resourceKind !== 'OBJECT_STORAGE' &&
+    source.resourceKind !== 'FILE_STORAGE'
+  ) return true;
+
+  const sourceText = compact(source.nativeSkuName);
+  const sourceUnit = compact(source.usageUnit ?? '');
+  const targetText = compact(
+    `${target.nativeSkuName} ${target.displayName} ${target.serviceName}`,
+  );
+  if (sourceUnit.includes('request')) return targetText.includes('request');
+  const sourceIsArchive = /glacier|archive|gda|deeparchive/.test(sourceText);
+  const sourceIsInfrequent = /infrequent|standardia|timedstoragesia|intia/.test(
+    sourceText,
+  );
+  const sourceIsIntelligent = /intelligent|timedstorageint/.test(sourceText);
+
+  if (sourceIsArchive) return /archive|cold|glacier/.test(targetText);
+  if (sourceIsInfrequent) return /infrequent|cool|cold|archive/.test(targetText);
+  if (source.resourceKind === 'FILE_STORAGE') {
+    return !/archive|lustre/.test(targetText);
+  }
+  if (sourceIsIntelligent) return /intelligent|autotier/.test(targetText);
+  return /standard|generalpurpose|hot/.test(targetText);
+}
+
 function compatiblePricingUnits(unit: string | null): string[] | undefined {
   const normalized = (unit ?? '').toLowerCase().replace(/[\s_-]/g, '');
   if (/^(hrs?|hours?|horas?)$/.test(normalized)) return ['Hrs', 'hour', 'Hour', 'h'];
@@ -429,6 +461,9 @@ function compatiblePricingUnits(unit: string | null): string[] | undefined {
     return ['GB-Mo', 'GB-month', 'GiBy.mo'];
   }
   if (['gb', 'gib', 'giby', 'gigabyte', 'gibibyte'].includes(normalized)) return ['GB', 'GiB', 'GiBy'];
+  if (['keymo', 'keymonth', 'keyversionmonth'].includes(normalized)) {
+    return ['Key-Mo'];
+  }
   return unit ? [unit] : undefined;
 }
 
@@ -568,6 +603,8 @@ function inferResourceKind(
   if (provider !== 'AWS') {
     return isComputeService(provider, service, lineItem) ? 'COMPUTE_VM' : null;
   }
+  if (isInternetEgressUsage(usage)) return 'DATA_TRANSFER';
+  if (isUnsupportedTransferUsage(usage)) return null;
   if (identity.includes('amazonrds') && sku.startsWith('db.')) {
     if (engine === 'MySQL') return 'MANAGED_MYSQL';
     if (engine === 'PostgreSQL') return 'MANAGED_POSTGRES';
@@ -584,19 +621,35 @@ function inferResourceKind(
     if (/ebs.*volume|volume(?:usage|p-iops|p-throughput)/.test(usage)) {
       return 'BLOCK_STORAGE';
     }
-    if (/transfer|(?:out|regional)-bytes/.test(usage)) return 'DATA_TRANSFER';
   }
   if (identity.includes('amazons3') || identity.includes('amazonglacier')) {
     return 'OBJECT_STORAGE';
   }
+  if (
+    identity.includes('amazonsimplequeueservice') &&
+    /request/.test(usage)
+  ) return 'QUEUE';
+  if (identity.includes('amazonroute53') && /dns-queries/.test(usage)) {
+    return 'DNS';
+  }
+  if (identity.includes('amazonefs') && /timedstorage/.test(usage)) {
+    return 'FILE_STORAGE';
+  }
+  if (
+    identity.includes('awskeymanagementservice') &&
+    /kms-keys/.test(usage)
+  ) return 'KEY_MANAGEMENT';
   if (identity.includes('amazoncloudwatch') && /log|data(?:processing|scanned|ingestion)/.test(usage)) {
     return 'OBSERVABILITY_LOGS';
   }
-  if (identity.includes('awslambda') && /duration|gb-second|gbsecond/.test(usage)) {
+  if (
+    identity.includes('awslambda') &&
+    /duration|gb-second|gbsecond|(?:^|[-:])request(?:s|-arm|\s|$)/.test(usage)
+  ) {
     return 'SERVERLESS_FUNCTION';
   }
   if (identity.includes('awselasticloadbalancing') || identity.includes('elasticloadbalancing')) {
-    return /bytes|data/.test(usage) ? 'DATA_TRANSFER' : 'LOAD_BALANCER';
+    return 'LOAD_BALANCER';
   }
   if (identity.includes('awswaf')) return 'WAF';
   if (identity.includes('kubernetes') || identity.includes('amazoneks')) return 'KUBERNETES';
@@ -604,6 +657,16 @@ function inferResourceKind(
     return 'DATA_TRANSFER';
   }
   return null;
+}
+
+function isInternetEgressUsage(usage: string): boolean {
+  return /(?:^|[-:])data-?transfer-out-bytes(?:\s|$)/.test(usage);
+}
+
+function isUnsupportedTransferUsage(usage: string): boolean {
+  return /aws-out-bytes|data-?transfer-regional-bytes|vpcpeering-(?:in|out)-bytes/.test(
+    usage,
+  );
 }
 
 function compact(value: string | undefined): string {

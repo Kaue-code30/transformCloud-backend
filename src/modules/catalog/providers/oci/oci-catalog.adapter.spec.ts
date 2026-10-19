@@ -202,6 +202,30 @@ describe('OciCatalogAdapter', () => {
       serviceCategory: 'Storage',
       expectedKind: 'BLOCK_STORAGE',
     },
+    {
+      displayName: 'OCI Queue',
+      metricName: '1,000,000 Requests',
+      serviceCategory: 'OCI Queue',
+      expectedKind: 'QUEUE',
+    },
+    {
+      displayName: 'Networking - DNS',
+      metricName: '1,000,000 Queries',
+      serviceCategory: 'Networking - DNS',
+      expectedKind: 'DNS',
+    },
+    {
+      displayName: 'File Storage - Storage',
+      metricName: 'Gigabyte Storage Capacity Per Month',
+      serviceCategory: 'Storage - File Storage',
+      expectedKind: 'FILE_STORAGE',
+    },
+    {
+      displayName: 'Key Management Service - Key Versions',
+      metricName: 'Key Version Per Month',
+      serviceCategory: 'Security - Key Management',
+      expectedKind: 'KEY_MANAGEMENT',
+    },
   ])(
     'reconhece $expectedKind na lista pública da OCI',
     ({
