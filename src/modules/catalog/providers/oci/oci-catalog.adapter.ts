@@ -43,6 +43,7 @@ export interface OciCatalogSyncOptions {
   offeringName?: string;
   vcpu?: number;
   ocpu?: number;
+  vpuPerGiB?: number;
   memoryGiB?: number;
   operatingSystem?: string;
   architecture?: string;
@@ -178,6 +179,11 @@ export class OciCatalogAdapter {
         resourceKind,
       });
       const partNumbers = group.map((item) => item.product.partNumber);
+      const completeness = pricingCompletenessFor(
+        resourceKind,
+        group.map((item) => item.product),
+        options,
+      );
       const nativeSkuName =
         options.offeringName ?? first.product.displayName;
       const groupId = options.offeringName
@@ -194,13 +200,17 @@ export class OciCatalogAdapter {
         purchaseOption: 'ON_DEMAND',
         operatingSystem: options.operatingSystem,
         architecture: options.architecture,
-        engine: options.engine ?? inferEngine(resourceKind),
+        engine: options.engine ?? inferEngine(resourceKind, first.product),
         vcpu: options.vcpu,
         memoryGiB: options.memoryGiB,
         attributes: {
           partNumbers,
           serviceCategory: first.product.serviceCategory,
           globalListPrice: true,
+          ...(options.vpuPerGiB != null
+            ? { vpuPerGiB: options.vpuPerGiB }
+            : {}),
+          ...completeness,
         },
         rawSource: {
           composite: group.length > 1,
@@ -291,6 +301,24 @@ function resourceKindFor(
   ]
     .join(' ')
     .toLowerCase();
+  if (
+    text.includes('web application firewall') ||
+    /\bwaf\b/.test(text)
+  ) return 'WAF';
+  if (
+    (text.includes('cache') || text.includes('memorydb')) &&
+    (text.includes('redis') || text.includes('valkey'))
+  ) return 'REDIS_CACHE';
+  if (
+    text.includes('container engine for kubernetes') ||
+    text.includes('kubernetes engine') ||
+    /\boke\b/.test(text)
+  ) return 'KUBERNETES';
+  if (text.includes('load balancer')) return 'LOAD_BALANCER';
+  if (
+    text.includes('block volume') ||
+    text.includes('block storage')
+  ) return 'BLOCK_STORAGE';
   if (text.includes('postgresql')) return 'MANAGED_POSTGRES';
   if (text.includes('mysql')) return 'MANAGED_MYSQL';
   if (text.includes('function')) return 'SERVERLESS_FUNCTION';
@@ -323,6 +351,13 @@ function normalizeOciUnit(
   }
   if (kind === 'DATA_TRANSFER' && lower.includes('gigabyte')) {
     return { unit: 'GB', multiplier };
+  }
+  if (
+    lower.includes('performance unit') &&
+    lower.includes('per gigabyte') &&
+    lower.includes('per month')
+  ) {
+    return { unit: 'VPU-GB-Mo', multiplier };
   }
   if (
     lower.includes('gigabyte') &&
@@ -361,6 +396,13 @@ function componentQuantity(
   const lower = metricName.toLowerCase();
   if (lower.includes('ocpu') && options.ocpu) return options.ocpu;
   if (
+    lower.includes('performance unit') &&
+    lower.includes('per gigabyte') &&
+    options.vpuPerGiB
+  ) {
+    return options.vpuPerGiB;
+  }
+  if (
     lower.includes('gigabyte') &&
     lower.includes('per hour') &&
     options.memoryGiB
@@ -370,9 +412,39 @@ function componentQuantity(
   return 1;
 }
 
-function inferEngine(kind: CatalogResourceKind): string | undefined {
+function pricingCompletenessFor(
+  kind: CatalogResourceKind,
+  products: OciPriceProduct[],
+  options: OciCatalogSyncOptions,
+): Record<string, unknown> {
+  if (kind !== 'BLOCK_STORAGE') return {};
+  const metrics = products.map((product) => product.metricName.toLowerCase());
+  const hasCapacity = metrics.some((metric) =>
+    metric.includes('storage capacity per month'),
+  );
+  const hasPerformance = metrics.some((metric) =>
+    metric.includes('performance unit') && metric.includes('per gigabyte'),
+  );
+  if (hasCapacity && hasPerformance && options.vpuPerGiB) return {};
+  return {
+    pricingCompleteness: 'PARTIAL',
+    pricingLimitations: [
+      'Block Volume exige capacidade e VPUs por GB para representar o perfil de desempenho',
+    ],
+  };
+}
+
+function inferEngine(
+  kind: CatalogResourceKind,
+  product?: OciPriceProduct,
+): string | undefined {
   if (kind === 'MANAGED_POSTGRES') return 'PostgreSQL';
   if (kind === 'MANAGED_MYSQL') return 'MySQL';
+  if (kind === 'REDIS_CACHE') {
+    const text = `${product?.displayName ?? ''} ${product?.description ?? ''} ${product?.serviceCategory ?? ''}`.toLowerCase();
+    if (text.includes('valkey')) return 'Valkey';
+    if (text.includes('redis')) return 'Redis';
+  }
   return undefined;
 }
 

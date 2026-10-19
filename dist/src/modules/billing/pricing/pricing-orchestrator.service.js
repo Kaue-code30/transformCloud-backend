@@ -18,11 +18,13 @@ let PricingOrchestratorService = class PricingOrchestratorService {
         this.catalogPricing = catalogPricing;
     }
     async fetchPrices(billing, mappings) {
-        const results = await Promise.all(billing.topServices.map((service) => {
-            const mapping = mappings.mappings.find((item) => normalize(item.original) === normalize(service.name));
+        const results = await mapWithConcurrency(billing.topServices, 12, async (service) => {
+            const mapping = mappings.mappings.find((item) => (service.sourceLineItemKey &&
+                item.sourceLineItemKey === service.sourceLineItemKey) ||
+                normalize(item.original) === normalize(service.name));
             const lineItem = findLineItem(service, billing.lineItems ?? []);
             return this.fetchServicePrice(service, mapping ?? null, lineItem);
-        }));
+        });
         return this.classify(results, billing.totalCost, billing.provider, billing.currency);
     }
     async fetchServicePrice(service, mapping, lineItem) {
@@ -61,7 +63,10 @@ let PricingOrchestratorService = class PricingOrchestratorService {
             source: price.source,
             effectiveFrom: price.effectiveFrom,
             catalogOfferingId: mapping.catalogOfferingId,
-            verified: true,
+            verified: price.complete,
+            ...(price.complete
+                ? {}
+                : { reason: price.limitations.join('; ') }),
         };
     }
     classify(raw, totalCost, sourceProvider, billingCurrency) {
@@ -102,8 +107,10 @@ let PricingOrchestratorService = class PricingOrchestratorService {
         };
     }
     resolveStatus(entry, confidence, billingCurrency) {
-        if (!entry.verified || entry.price === null)
+        if (entry.price === null)
             return 'not_found';
+        if (!entry.verified)
+            return 'partial';
         if (entry.currency && entry.currency !== billingCurrency)
             return 'partial';
         if (confidence === 'high')
@@ -172,5 +179,18 @@ function notAvailable(reason) {
 }
 function normalize(value) {
     return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+async function mapWithConcurrency(values, concurrency, worker) {
+    const results = new Array(values.length);
+    let next = 0;
+    const runners = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+        while (next < values.length) {
+            const index = next;
+            next += 1;
+            results[index] = await worker(values[index]);
+        }
+    });
+    await Promise.all(runners);
+    return results;
 }
 //# sourceMappingURL=pricing-orchestrator.service.js.map

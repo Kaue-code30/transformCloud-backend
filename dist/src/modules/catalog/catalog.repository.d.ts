@@ -28,6 +28,7 @@ export declare class CatalogRepository {
         nativeSkuName?: string;
         nativeProductId?: string;
         region?: string;
+        engine?: string | null;
     }): Promise<CatalogOfferingView | null>;
     findOfferingByMeterIdentity(params: {
         provider: CatalogProvider;

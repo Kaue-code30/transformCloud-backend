@@ -31,6 +31,7 @@ export interface OciCatalogSyncOptions {
     offeringName?: string;
     vcpu?: number;
     ocpu?: number;
+    vpuPerGiB?: number;
     memoryGiB?: number;
     operatingSystem?: string;
     architecture?: string;

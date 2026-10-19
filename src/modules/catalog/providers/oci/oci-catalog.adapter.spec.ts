@@ -103,4 +103,135 @@ describe('OciCatalogAdapter', () => {
       }),
     ).toThrow('Part numbers OCI solicitados');
   });
+
+  it('compõe capacidade e 10 VPUs no Block Volume Balanced', () => {
+    const products = [
+      {
+        partNumber: 'B91961',
+        displayName: 'Storage - Block Volume - Storage',
+        metricName: 'Gigabyte Storage Capacity Per Month',
+        serviceCategory: 'Storage - Block Volumes',
+        currencyCodeLocalizations: [{
+          currencyCode: 'USD',
+          prices: [{ model: 'PAY_AS_YOU_GO', value: 0.0255 }],
+        }],
+      },
+      {
+        partNumber: 'B91962',
+        displayName: 'Storage - Block Volume - Performance Units',
+        metricName: 'Performance Units Per Gigabyte Per Month',
+        serviceCategory: 'Storage - Block Volumes',
+        currencyCodeLocalizations: [{
+          currencyCode: 'USD',
+          prices: [{ model: 'PAY_AS_YOU_GO', value: 0.0017 }],
+        }],
+      },
+    ];
+
+    const snapshot = new OciCatalogAdapter().toSnapshot(products, {
+      region: 'sa-saopaulo-1',
+      partNumbers: ['B91961', 'B91962'],
+      resourceKind: 'BLOCK_STORAGE',
+      offeringName: 'Block Volume Balanced (10 VPU/GB)',
+      vpuPerGiB: 10,
+      effectiveFrom: '2026-10-19T00:00:00Z',
+    });
+
+    expect(snapshot.offeringMeters.map((item) => item.quantity)).toEqual([
+      1, 10,
+    ]);
+    expect(snapshot.meters.map((item) => item.pricingUnit)).toEqual([
+      'GB-Mo', 'VPU-GB-Mo',
+    ]);
+    expect(snapshot.offerings[0].attributes).toMatchObject({ vpuPerGiB: 10 });
+    expect(snapshot.offerings[0].attributes?.pricingCompleteness).toBeUndefined();
+  });
+
+  it('marca Block Volume sem VPUs como preço parcial', () => {
+    const snapshot = new OciCatalogAdapter().toSnapshot(
+      [{
+        partNumber: 'B91961',
+        displayName: 'Storage - Block Volume - Storage',
+        metricName: 'Gigabyte Storage Capacity Per Month',
+        serviceCategory: 'Storage - Block Volumes',
+        currencyCodeLocalizations: [{
+          currencyCode: 'USD',
+          prices: [{ model: 'PAY_AS_YOU_GO', value: 0.0255 }],
+        }],
+      }],
+      {
+        region: 'sa-saopaulo-1',
+        effectiveFrom: '2026-10-19T00:00:00Z',
+      },
+    );
+
+    expect(snapshot.offerings[0].attributes).toMatchObject({
+      pricingCompleteness: 'PARTIAL',
+    });
+  });
+
+  it.each([
+    {
+      displayName: 'OCI Cache with Redis - Memory',
+      metricName: 'Gigabyte Per Hour',
+      serviceCategory: 'Databases - Cache with Redis',
+      expectedKind: 'REDIS_CACHE',
+      expectedEngine: 'Redis',
+    },
+    {
+      displayName: 'Oracle Container Engine for Kubernetes - Enhanced Cluster',
+      metricName: 'Cluster Per Hour',
+      serviceCategory: 'Containers',
+      expectedKind: 'KUBERNETES',
+    },
+    {
+      displayName: 'Load Balancer Base Instance',
+      metricName: 'Load Balancer Hour',
+      serviceCategory: 'Networking - Load Balancer',
+      expectedKind: 'LOAD_BALANCER',
+    },
+    {
+      displayName: 'Web Application Firewall - Requests',
+      metricName: '10,000 Requests',
+      serviceCategory: 'Security - Web Application Firewall',
+      expectedKind: 'WAF',
+    },
+    {
+      displayName: 'Block Volume Storage',
+      metricName: 'Gigabyte Storage Capacity Per Month',
+      serviceCategory: 'Storage',
+      expectedKind: 'BLOCK_STORAGE',
+    },
+  ])(
+    'reconhece $expectedKind na lista pública da OCI',
+    ({
+      displayName,
+      metricName,
+      serviceCategory,
+      expectedKind,
+      expectedEngine,
+    }) => {
+      const snapshot = new OciCatalogAdapter().toSnapshot(
+        [{
+          partNumber: `TEST-${expectedKind}`,
+          displayName,
+          metricName,
+          serviceCategory,
+          currencyCodeLocalizations: [{
+            currencyCode: 'USD',
+            prices: [{ model: 'PAY_AS_YOU_GO', value: 0.01 }],
+          }],
+        }],
+        {
+          region: 'sa-saopaulo-1',
+          effectiveFrom: '2026-10-05T00:00:00Z',
+        },
+      );
+
+      expect(snapshot.services[0].resourceKind).toBe(expectedKind);
+      if (expectedEngine) {
+        expect(snapshot.offerings[0].engine).toBe(expectedEngine);
+      }
+    },
+  );
 });

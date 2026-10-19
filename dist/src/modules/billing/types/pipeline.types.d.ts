@@ -75,6 +75,7 @@ export interface AzureMapping extends MappingMetadata {
 export interface OciMapping extends MappingMetadata {
     service: string;
     shape?: string;
+    region?: string;
     ocpu?: number;
     memoryGb?: number;
     confidence: Confidence;
@@ -88,6 +89,7 @@ export interface AwsMapping extends MappingMetadata {
     confidence: Confidence;
 }
 export interface ServiceMapping {
+    sourceLineItemKey?: string;
     original: string;
     gcp?: GcpMapping;
     azure?: AzureMapping;
@@ -140,11 +142,28 @@ export interface ClassificationResult {
         coveredCostPct: number;
     };
 }
+export type MigrationComplexity = 'low' | 'medium' | 'high';
+export interface MigrationAttentionPoint {
+    service: string;
+    status: Exclude<VerificationStatus, 'verified'>;
+    reason: string;
+}
+export interface MigrationComplexityDetails {
+    basis: 'catalog_compatibility';
+    isMigration: boolean;
+    summary: string;
+    verifiedServices: number;
+    totalServices: number;
+    coveredCostPct: number;
+    attentionPoints: MigrationAttentionPoint[];
+    disclaimer: string;
+}
 export interface RecommendationResult {
     recommendation: {
         provider: CloudProvider;
         basedOnVerified: boolean;
-        migrationComplexity: string;
+        migrationComplexity: MigrationComplexity;
+        migrationComplexityDetails: MigrationComplexityDetails;
         reasons: string[];
         topServices: string[];
         cfa_justification: string;

@@ -29,13 +29,16 @@ export class CatalogPricingService {
       const componentUsage = usageQuantity * component.quantity.toNumber();
       const multiplier = component.meter.unitMultiplier.toNumber();
       if (multiplier <= 0 || !component.meter.tiers.length) return null;
-      estimatedCost += calculateTieredCost(
-        componentUsage / multiplier,
+      const publicListPriceTiers = withoutAccountAllowances(
         component.meter.tiers.map((tier) => ({
           start: tier.startQuantity.toNumber(),
           end: tier.endQuantity?.toNumber() ?? null,
           price: tier.unitPrice.toNumber(),
         })),
+      );
+      estimatedCost += calculateTieredCost(
+        componentUsage / multiplier,
+        publicListPriceTiers,
       );
     }
 
@@ -43,16 +46,63 @@ export class CatalogPricingService {
       .map(({ meter }) => meter.effectiveFrom)
       .sort((a, b) => b.getTime() - a.getTime())[0];
 
+    const completeness = pricingCompleteness(offering.attributes);
+    const catalogSource = meterCatalogSource(components[0].meter.attributes) ??
+      `Catálogo local versionado (${offering.provider}/${offering.nativeSkuName})`;
+
     return {
       unitPrice: Number((estimatedCost / usageQuantity).toFixed(10)),
       estimatedCost: Number(estimatedCost.toFixed(2)),
       unit: components.map(({ meter }) => meter.pricingUnit).join(' + '),
       currency: components[0].meter.currency,
-      source: meterCatalogSource(components[0].meter.attributes) ??
-        `Catálogo local versionado (${offering.provider}/${offering.nativeSkuName})`,
+      source: `${catalogSource} — preço público sem franquias por conta`,
       effectiveFrom: effectiveFrom.toISOString(),
+      complete: completeness.complete,
+      limitations: completeness.limitations,
     };
   }
+}
+
+/**
+ * Franquias gratuitas pertencem à conta/tenancy e são compartilhadas entre
+ * recursos. Como o pipeline não conhece o consumo agregado da conta de destino,
+ * a comparação usa a tarifa pública paga desde a primeira unidade.
+ */
+function withoutAccountAllowances(tiers: Tier[]): Tier[] {
+  const ordered = [...tiers].sort((a, b) => a.start - b.start);
+  const firstPaidIndex = ordered.findIndex((tier) => tier.price > 0);
+  if (firstPaidIndex <= 0) return ordered;
+
+  const preceding = ordered.slice(0, firstPaidIndex);
+  const allowance = ordered[firstPaidIndex].start;
+  if (allowance <= 0 || preceding.some((tier) => tier.price !== 0)) {
+    return ordered;
+  }
+
+  return ordered.slice(firstPaidIndex).map((tier) => ({
+    ...tier,
+    start: Math.max(0, tier.start - allowance),
+    end: tier.end == null ? null : Math.max(0, tier.end - allowance),
+  }));
+}
+
+function pricingCompleteness(value: unknown): {
+  complete: boolean;
+  limitations: string[];
+} {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { complete: true, limitations: [] };
+  }
+  const attributes = value as Record<string, unknown>;
+  if (attributes.pricingCompleteness !== 'PARTIAL') {
+    return { complete: true, limitations: [] };
+  }
+  const limitations = Array.isArray(attributes.pricingLimitations)
+    ? attributes.pricingLimitations.filter(
+        (item): item is string => typeof item === 'string' && item.length > 0,
+      )
+    : ['Oferta sem todos os componentes obrigatórios de custo'];
+  return { complete: false, limitations };
 }
 
 function meterCatalogSource(value: unknown): string | null {

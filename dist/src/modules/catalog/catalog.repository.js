@@ -37,6 +37,9 @@ let CatalogRepository = class CatalogRepository {
                 active: true,
                 ...catalogSourceFilter(),
                 ...(params.region ? { region: params.region } : {}),
+                ...(params.engine
+                    ? { engine: { equals: params.engine, mode: 'insensitive' } }
+                    : {}),
                 OR: [
                     ...(params.nativeSkuName
                         ? [{ nativeSkuName: { equals: params.nativeSkuName, mode: 'insensitive' } }]

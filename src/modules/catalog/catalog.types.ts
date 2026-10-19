@@ -121,4 +121,6 @@ export interface CatalogPriceResult {
   currency: string;
   source: string;
   effectiveFrom: string;
+  complete: boolean;
+  limitations: string[];
 }

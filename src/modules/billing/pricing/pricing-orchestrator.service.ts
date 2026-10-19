@@ -28,14 +28,19 @@ export class PricingOrchestratorService {
     },
     mappings: MappingResult,
   ): Promise<ClassificationResult> {
-    const results = await Promise.all(
-      billing.topServices.map((service) => {
+    const results = await mapWithConcurrency(
+      billing.topServices,
+      12,
+      async (service) => {
         const mapping = mappings.mappings.find(
-          (item) => normalize(item.original) === normalize(service.name),
+          (item) =>
+            (service.sourceLineItemKey &&
+              item.sourceLineItemKey === service.sourceLineItemKey) ||
+            normalize(item.original) === normalize(service.name),
         );
         const lineItem = findLineItem(service, billing.lineItems ?? []);
         return this.fetchServicePrice(service, mapping ?? null, lineItem);
-      }),
+      },
     );
 
     return this.classify(
@@ -94,7 +99,10 @@ export class PricingOrchestratorService {
       source: price.source,
       effectiveFrom: price.effectiveFrom,
       catalogOfferingId: mapping.catalogOfferingId,
-      verified: true,
+      verified: price.complete,
+      ...(price.complete
+        ? {}
+        : { reason: price.limitations.join('; ') }),
     };
   }
 
@@ -156,7 +164,8 @@ export class PricingOrchestratorService {
     confidence: Confidence | null,
     billingCurrency: string,
   ): VerificationStatus {
-    if (!entry.verified || entry.price === null) return 'not_found';
+    if (entry.price === null) return 'not_found';
+    if (!entry.verified) return 'partial';
     if (entry.currency && entry.currency !== billingCurrency) return 'partial';
     if (confidence === 'high') return 'verified';
     if (confidence === 'medium' || confidence === 'low') return 'partial';
@@ -233,4 +242,22 @@ function notAvailable(reason: string): PriceEntry {
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await worker(values[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }

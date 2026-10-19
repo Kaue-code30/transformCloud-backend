@@ -83,11 +83,25 @@ npm run catalog:sync:oci -- --region=sa-saopaulo-1 `
   --memory=32 --os=Linux --arch=arm64
 ```
 
+Block Volume Balanced usa os dois componentes oficiais: capacidade e 10 VPUs por GB/mês. Se um deles faltar, a oferta é importada como `partial`:
+
+```powershell
+npm run catalog:sync:oci -- --region=sa-saopaulo-1 `
+  --partNumbers=B91961,B91962 --kind=BLOCK_STORAGE `
+  --offering="Block Volume Balanced (10 VPU/GB)" --vpuPerGiB=10
+```
+
 A sincronização falha se algum part number solicitado não estiver presente. O payload bruto e a data efetiva da importação são preservados para auditoria.
 
 ### Fontes e persistência
 
 Cada sincronização grava ofertas, medidores e tiers no PostgreSQL. A análise usa esses registros locais e não consulta os provedores a cada upload. Novas consultas externas acontecem somente quando um comando `catalog:sync:*` é executado.
+
+### Política de comparação de preços
+
+A comparação usa a tarifa pública paga desde a primeira unidade e não desconta franquias gratuitas vinculadas à conta ou tenancy. Essas franquias são compartilhadas, podem já ter sido consumidas e não são conhecidas pelo pipeline; aplicá-las individualmente a cada oferta produziria economia artificial.
+
+Uma oferta que não contém todos os componentes obrigatórios pode manter seu valor calculado para auditoria, mas recebe status `partial` e não participa como preço verificado do ranking. Por exemplo, o SKU de OCPU do OCI Database with PostgreSQL sem armazenamento otimizado, memória e VPUs não representa o TCO completo do banco.
 
 Fixtures com `sourceKey` iniciado por `TEST:` não participam do matching normal. Para um teste reproduzível exclusivamente com fixtures, configure `CATALOG_ALLOW_TEST_FIXTURES=true`.
 

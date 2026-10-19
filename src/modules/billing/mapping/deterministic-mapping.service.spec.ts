@@ -205,10 +205,160 @@ describe('DeterministicMappingService', () => {
     const result = await service.mapServices(input);
 
     expect(result.mappings[0]).toEqual({
+      sourceLineItemKey: 'rds-line',
       original: 'Amazon RDS — db.r6g.large',
     });
     expect(result.unmapped[0].reason).toContain('estratégia determinística');
     expect(findComputeCandidates).not.toHaveBeenCalled();
+  });
+
+  it('não trata snapshot EBS como Block Volume', async () => {
+    const findResourceCandidates = jest.fn();
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 'ebs-snapshot-line',
+      name: 'Amazon Elastic Block Store',
+      specs: 'EBS:SnapshotUsage, sa-east-1',
+      nativeSkuName: 'snapshot',
+      region: 'sa-east-1',
+      quantity: '100 GB-Mo',
+      cost: 5,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 'ebs-snapshot-line',
+      provider: 'AWS',
+      serviceCode: 'AmazonEC2',
+      serviceName: 'Amazon Elastic Block Store',
+      nativeSkuName: 'snapshot',
+      usageType: 'EBS:SnapshotUsage',
+      region: 'sa-east-1',
+      quantity: 100,
+      unit: 'GB-Mo',
+      cost: 5,
+      currency: 'USD',
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toBeUndefined();
+    expect(findResourceCandidates).not.toHaveBeenCalled();
+  });
+
+  it('reconhece ElastiCache Redis e preserva o engine no de-para', async () => {
+    const target = offering({
+      id: 'oci-cache-redis',
+      provider: 'OCI',
+      resourceKind: 'REDIS_CACHE',
+      serviceName: 'OCI Cache with Redis',
+      serviceNativeCode: 'OCI:REDIS_CACHE:Cache with Redis',
+      nativeSkuName: 'OCI Cache Redis',
+      displayName: 'OCI Cache with Redis',
+      region: 'sa-saopaulo-1',
+      engine: 'Redis',
+      architecture: null,
+      operatingSystem: null,
+      vcpu: null,
+      memoryGiB: null,
+    });
+    const findResourceCandidates = jest.fn().mockImplementation(({ provider }) =>
+      Promise.resolve(provider === 'OCI' ? [target] : []),
+    );
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 'elasticache-redis-line',
+      name: 'Amazon ElastiCache',
+      specs: 'cache.r7g.large, Redis, sa-east-1',
+      nativeSkuName: 'cache.r7g.large',
+      region: 'sa-east-1',
+      usageQuantity: 730,
+      usageUnit: 'Hrs',
+      quantity: '730 Hrs',
+      cost: 120,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 'elasticache-redis-line',
+      provider: 'AWS',
+      serviceCode: 'AmazonElastiCache',
+      serviceName: 'Amazon ElastiCache',
+      nativeSkuName: 'cache.r7g.large',
+      usageType: 'USE1-NodeUsage:cache.r7g.large',
+      operation: 'CreateCacheCluster:0002',
+      region: 'sa-east-1',
+      quantity: 730,
+      unit: 'Hrs',
+      cost: 120,
+      currency: 'USD',
+      attributes: { cacheEngine: 'Redis' },
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toMatchObject({
+      catalogOfferingId: 'oci-cache-redis',
+      service: 'OCI Cache with Redis',
+    });
+    expect(findResourceCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'OCI',
+        resourceKind: 'REDIS_CACHE',
+        engine: 'Redis',
+      }),
+    );
+  });
+
+  it('não trata ElastiCache Memcached como Redis', async () => {
+    const findResourceCandidates = jest.fn();
+    const catalog = {
+      findOfferingByMeterIdentity: jest.fn().mockResolvedValue(null),
+      findOfferingByNativeIdentity: jest.fn().mockResolvedValue(null),
+      findResourceCandidates,
+    } as unknown as CatalogRepository;
+    const service = new DeterministicMappingService(catalog);
+    const input = billing();
+    input.topServices[0] = {
+      sourceLineItemKey: 'elasticache-memcached-line',
+      name: 'Amazon ElastiCache',
+      specs: 'cache.r7g.large, Memcached, sa-east-1',
+      nativeSkuName: 'cache.r7g.large',
+      region: 'sa-east-1',
+      quantity: '730 Hrs',
+      cost: 120,
+      pct: 100,
+    };
+    input.lineItems = [{
+      sourceKey: 'elasticache-memcached-line',
+      provider: 'AWS',
+      serviceCode: 'AmazonElastiCache',
+      serviceName: 'Amazon ElastiCache',
+      nativeSkuName: 'cache.r7g.large',
+      usageType: 'USE1-NodeUsage:cache.r7g.large',
+      region: 'sa-east-1',
+      quantity: 730,
+      unit: 'Hrs',
+      cost: 120,
+      currency: 'USD',
+      attributes: { cacheEngine: 'Memcached' },
+    }];
+
+    const result = await service.mapServices(input);
+
+    expect(result.mappings[0].oci).toBeUndefined();
+    expect(result.unmapped[0].reason).toContain('estratégia determinística');
+    expect(findResourceCandidates).not.toHaveBeenCalled();
   });
 
   it('prioriza catálogo oficial quando existe um fixture equivalente', async () => {

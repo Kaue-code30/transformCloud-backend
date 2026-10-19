@@ -9,7 +9,7 @@ async function bootstrap() {
   const args = parseArgs();
   if (!args.region || (!args.match && !args.partNumber && !args.partNumbers)) {
     throw new Error(
-      'Uso: npm run catalog:sync:oci -- --region=sa-saopaulo-1 (--match="Object Storage - Storage" | --partNumber=B91628 | --partNumbers=B93297,B93298) [--kind=OBJECT_STORAGE] [--offering=...] [--max=100]',
+      'Uso: npm run catalog:sync:oci -- --region=sa-saopaulo-1 (--match="Object Storage - Storage" | --partNumber=B91628 | --partNumbers=B93297,B93298) [--kind=OBJECT_STORAGE] [--offering=...] [--vpuPerGiB=10] [--max=100]',
     );
   }
   const app = await NestFactory.createApplicationContext(CatalogModule);
@@ -27,6 +27,7 @@ async function bootstrap() {
       offeringName: args.offering || undefined,
       vcpu: optionalNumber(args.vcpu),
       ocpu: optionalNumber(args.ocpu),
+      vpuPerGiB: optionalNumber(args.vpuPerGiB),
       memoryGiB: optionalNumber(args.memory),
       operatingSystem: args.os || undefined,
       architecture: args.arch || undefined,

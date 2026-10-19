@@ -94,6 +94,8 @@ exports.PipelineService = PipelineService = __decorate([
 ], PipelineService);
 const NON_TECHNICAL_SERVICES = new Set([
     'tax', 'support', 'credits', 'refund', 'discount',
+    'savings plans for aws compute usage',
+    'aws cost explorer',
 ]);
 const SERVICE_NAME_MAP = {
     'ec2-instances': 'Amazon EC2',
@@ -127,7 +129,6 @@ function normalizeBilling(billing) {
         ? normalizedLineItems
             .map((item, index) => lineItemToTopService(item, index, billing.totalCost))
             .sort((a, b) => b.cost - a.cost)
-            .slice(0, 25)
         : (billing.topServices ?? [])
             .filter((s) => {
             return isTechnicalService(s.name);
@@ -142,8 +143,7 @@ function normalizeBilling(billing) {
                 quantity: s.quantity ?? 'qtd não informada',
             };
         })
-            .sort((a, b) => b.cost - a.cost)
-            .slice(0, 6);
+            .sort((a, b) => b.cost - a.cost);
     return {
         ...billing,
         targetRegion: billing.targetRegion ?? undefined,

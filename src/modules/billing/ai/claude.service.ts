@@ -59,6 +59,9 @@ Responda SEMPRE em JSON válido conforme o schema solicitado. Sem texto extra fo
         ...parsed.recommendation,
         provider: decision.recommendation.provider,
         basedOnVerified: decision.recommendation.basedOnVerified,
+        migrationComplexity: decision.recommendation.migrationComplexity,
+        migrationComplexityDetails:
+          decision.recommendation.migrationComplexityDetails,
       },
     };
   }
@@ -132,6 +135,8 @@ Bill atual (${billing.provider}):
 DECISÃO CALCULADA PELO SISTEMA:
 - Provedor: ${decision.recommendation.provider}
 - Baseada em cobertura suficiente: ${decision.recommendation.basedOnVerified}
+- Complexidade por compatibilidade de catálogo: ${decision.recommendation.migrationComplexity}
+- Evidência da complexidade: ${decision.recommendation.migrationComplexityDetails.summary}
 - Justificativa calculada: ${decision.recommendation.cfa_justification}
 
 Comparativo mensal do catálogo:
@@ -145,7 +150,7 @@ Retorne JSON no formato exato:
   "recommendation": {
     "provider": "${decision.recommendation.provider}",
     "basedOnVerified": ${decision.recommendation.basedOnVerified},
-    "migrationComplexity": "low|medium|high",
+    "migrationComplexity": "${decision.recommendation.migrationComplexity}",
     "reasons": ["<razão 1>", "<razão 2>"],
     "topServices": ["<serviço 1>", "<serviço 2>"],
     "cfa_justification": "<justificativa financeira detalhada>"
@@ -169,11 +174,18 @@ function calculateRecommendation(
   const best = candidates[0];
 
   if (!best || best.monthlySaving <= 0) {
+    const complexity = assessMigrationComplexity(
+      billing,
+      prices.classified,
+      billing.provider,
+      false,
+    );
     return {
       recommendation: {
         provider: billing.provider,
         basedOnVerified: false,
-        migrationComplexity: 'low',
+        migrationComplexity: complexity.level,
+        migrationComplexityDetails: complexity.details,
         reasons: ['O catálogo não demonstrou economia verificável suficiente para recomendar migração'],
         topServices: [],
         cfa_justification: 'Manter o provedor atual até que exista cobertura de preço suficiente e economia positiva.',
@@ -184,11 +196,18 @@ function calculateRecommendation(
   }
 
   const basedOnVerified = best.coveredCostPct >= 70;
+  const complexity = assessMigrationComplexity(
+    billing,
+    prices.classified,
+    best.provider,
+    true,
+  );
   return {
     recommendation: {
       provider: best.provider,
       basedOnVerified,
-      migrationComplexity: 'medium',
+      migrationComplexity: complexity.level,
+      migrationComplexityDetails: complexity.details,
       reasons: [
         `Economia mensal verificada de ${billing.currency} ${best.monthlySaving.toFixed(2)}`,
         `Cobertura de ${best.coveredCostPct}% do custo total`,
@@ -203,6 +222,93 @@ function calculateRecommendation(
       : ['A cobertura é inferior a 70%; valide os itens sem equivalência antes da decisão final.'],
     summary: `O ranking determinístico indica ${best.provider} com ${best.coveredCostPct}% de cobertura.`,
   };
+}
+
+function assessMigrationComplexity(
+  billing: ParsedBilling,
+  prices: ClassifiedPrice[],
+  provider: CloudProvider,
+  isMigration: boolean,
+): {
+  level: RecommendationResult['recommendation']['migrationComplexity'];
+  details: RecommendationResult['recommendation']['migrationComplexityDetails'];
+} {
+  const disclaimer =
+    'Estimativa baseada na compatibilidade e nos preços do catálogo; não avalia código, dependências da aplicação ou esforço de refatoração.';
+
+  if (!isMigration) {
+    return {
+      level: 'low',
+      details: {
+        basis: 'catalog_compatibility',
+        isMigration: false,
+        summary:
+          'O cenário recomendado mantém o provedor atual; não há migração a avaliar.',
+        verifiedServices: prices.length,
+        totalServices: prices.length,
+        coveredCostPct: 100,
+        attentionPoints: [],
+        disclaimer,
+      },
+    };
+  }
+
+  const verified = prices.filter(
+    (price) => providerSnapshot(price, provider).status === 'verified',
+  );
+  const attentionPoints = prices.flatMap((price) => {
+    const snapshot = providerSnapshot(price, provider);
+    if (snapshot.status === 'verified') return [];
+    return [{
+      service: price.service,
+      status: snapshot.status,
+      reason: snapshot.entry.reason ?? statusReason(snapshot.status, provider),
+    }];
+  });
+  const coveredCost = verified.reduce(
+    (sum, price) => sum + price.currentCost,
+    0,
+  );
+  const coveredCostPct = billing.totalCost > 0
+    ? Math.min(100, Math.round((coveredCost / billing.totalCost) * 100))
+    : 0;
+  const level = attentionPoints.length === 0
+    ? 'low'
+    : verified.length === 0
+      ? 'high'
+      : 'medium';
+  const summary = attentionPoints.length === 0
+    ? `${verified.length} de ${prices.length} serviços têm equivalência e preço verificados em ${provider}.`
+    : verified.length === 0
+      ? `Nenhum dos ${prices.length} serviços tem equivalência e preço verificados em ${provider}.`
+      : `${verified.length} de ${prices.length} serviços têm equivalência e preço verificados em ${provider}; ${attentionPoints.length} exigem validação.`;
+
+  return {
+    level,
+    details: {
+      basis: 'catalog_compatibility',
+      isMigration: true,
+      summary,
+      verifiedServices: verified.length,
+      totalServices: prices.length,
+      coveredCostPct,
+      attentionPoints,
+      disclaimer,
+    },
+  };
+}
+
+function statusReason(
+  status: Exclude<ClassificationResult['classified'][number]['awsStatus'], 'verified'>,
+  provider: CloudProvider,
+): string {
+  if (status === 'partial') {
+    return `Equivalência em ${provider} encontrada, mas ainda não totalmente verificada.`;
+  }
+  if (status === 'no_api') {
+    return `Preço de ${provider} indisponível para verificação automática.`;
+  }
+  return `Sem equivalência e preço verificados em ${provider}.`;
 }
 
 interface ProviderCandidate {

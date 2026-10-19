@@ -108,6 +108,8 @@ export class PipelineService {
 // Serviços que não devem ser mapeados — não são serviços cloud técnicos
 const NON_TECHNICAL_SERVICES = new Set([
   'tax', 'support', 'credits', 'refund', 'discount',
+  'savings plans for aws compute usage',
+  'aws cost explorer',
 ]);
 
 // Nomes genéricos que o frontend pode enviar → nome canônico para resolução do catálogo
@@ -149,7 +151,6 @@ function normalizeBilling(billing: ParsedBilling): ParsedBilling {
         .map((item, index) => lineItemToTopService(item, index, billing.totalCost))
         .sort((a, b) => b.cost - a.cost)
         // O catálogo é local; podemos analisar mais itens sem multiplicar chamadas externas.
-        .slice(0, 25)
     : (billing.topServices ?? [])
     // Remove serviços não-técnicos (Tax, Support, Credits, etc.)
     .filter((s) => {
@@ -167,8 +168,7 @@ function normalizeBilling(billing: ParsedBilling): ParsedBilling {
       };
     })
     // Ordena por custo e limita top 6
-    .sort((a, b) => b.cost - a.cost)
-    .slice(0, 6);
+    .sort((a, b) => b.cost - a.cost);
 
   return {
     ...billing,

@@ -19,43 +19,53 @@ let DeterministicMappingService = class DeterministicMappingService {
         this.catalog = catalog;
     }
     async mapServices(billing) {
-        const mappings = [];
-        const unmapped = [];
-        for (const service of billing.topServices) {
+        const results = await mapWithConcurrency(billing.topServices, 8, async (service) => {
             const lineItem = findLineItem(service, billing.lineItems ?? []);
             const source = await this.resolveSource(billing.provider, service, lineItem);
             if (!source) {
-                mappings.push({ original: service.name });
-                unmapped.push({
-                    service: service.name,
-                    reason: 'Serviço sem estratégia determinística compatível ou SKU/capacidade não encontrada no catálogo',
-                });
-                continue;
+                return {
+                    mapping: { sourceLineItemKey: service.sourceLineItemKey, original: service.name },
+                    unmapped: {
+                        service: service.name,
+                        reason: 'Serviço sem estratégia determinística compatível ou SKU/capacidade não encontrada no catálogo',
+                    },
+                };
             }
-            const mapping = { original: service.name };
-            const failures = [];
-            for (const targetProvider of TARGET_PROVIDERS.filter((provider) => provider !== billing.provider)) {
+            const mapping = {
+                sourceLineItemKey: service.sourceLineItemKey,
+                original: service.name,
+            };
+            const targets = TARGET_PROVIDERS.filter((provider) => provider !== billing.provider);
+            const targetResults = await Promise.all(targets.map(async (targetProvider) => {
                 const targetRegion = resolveTargetRegion(billing.targetRegion ?? source.region, targetProvider);
                 if (!targetRegion) {
-                    failures.push(`${targetProvider}: região equivalente não cadastrada`);
-                    continue;
+                    return `${targetProvider}: região equivalente não cadastrada`;
                 }
                 const match = await this.findTarget(source, targetProvider, targetRegion);
                 if (!match) {
-                    failures.push(`${targetProvider}: nenhuma oferta compatível no catálogo`);
-                    continue;
+                    return `${targetProvider}: nenhuma oferta compatível no catálogo`;
                 }
                 assignProviderMapping(mapping, match.offering, match.metadata);
-            }
-            mappings.push(mapping);
+                return null;
+            }));
+            const failures = targetResults.filter((value) => Boolean(value));
             if (!mapping.aws && !mapping.gcp && !mapping.azure && !mapping.oci) {
-                unmapped.push({
-                    service: service.name,
-                    reason: failures.join('; ') || 'Nenhuma oferta compatível encontrada',
-                });
+                return {
+                    mapping,
+                    unmapped: {
+                        service: service.name,
+                        reason: failures.join('; ') || 'Nenhuma oferta compatível encontrada',
+                    },
+                };
             }
-        }
-        return { mappings, unmapped };
+            return { mapping, unmapped: null };
+        });
+        return {
+            mappings: results.map((result) => result.mapping),
+            unmapped: results
+                .map((result) => result.unmapped)
+                .filter((item) => item !== null),
+        };
     }
     async resolveSource(provider, service, lineItem) {
         const nativeSkuName = service.nativeSkuName ??
@@ -65,7 +75,13 @@ let DeterministicMappingService = class DeterministicMappingService {
         const region = service.region ??
             lineItem?.region ??
             extractRegionFromSpecs(provider, service.specs);
-        const offering = await this.findSourceOffering(provider, nativeSkuName, nativeProductId, region, lineItem?.skuId, lineItem?.meterId);
+        const sourceEngine = normalizeEngine(stringAttribute(lineItem, [
+            'databaseEngine',
+            'cacheEngine',
+            'cache_engine',
+            'engine',
+        ]) ?? service.specs);
+        const offering = await this.findSourceOffering(provider, nativeSkuName, nativeProductId, region, lineItem?.skuId, lineItem?.meterId, sourceEngine);
         if (offering) {
             if (offering.resourceKind === 'COMPUTE_VM' &&
                 (!offering.vcpu || !offering.memoryGiB)) {
@@ -84,15 +100,19 @@ let DeterministicMappingService = class DeterministicMappingService {
                 memoryGiB: offering.memoryGiB,
             };
         }
-        if (!isComputeService(provider, service, lineItem))
+        const resourceKind = inferResourceKind(provider, service, lineItem, sourceEngine);
+        if (!resourceKind)
             return null;
         const vcpu = service.vcpu ?? numericAttribute(lineItem, ['vcpu', 'vcpus', 'cores']);
         const memoryGiB = service.memoryGiB ?? numericAttribute(lineItem, ['memoryGiB', 'memory_gib', 'memory']);
-        if (!nativeSkuName || !region || !vcpu || !memoryGiB)
+        if (!region)
             return null;
+        if (resourceKind === 'COMPUTE_VM' && (!nativeSkuName || !vcpu || !memoryGiB)) {
+            return null;
+        }
         return {
-            resourceKind: 'COMPUTE_VM',
-            nativeSkuName,
+            resourceKind,
+            nativeSkuName: nativeSkuName ?? lineItem?.usageType ?? service.name,
             region,
             operatingSystem: normalizeOperatingSystem(service.operatingSystem ??
                 stringAttribute(lineItem, ['operatingSystem', 'operating_system', 'os']) ??
@@ -100,20 +120,28 @@ let DeterministicMappingService = class DeterministicMappingService {
             architecture: normalizeArchitecture(service.architecture ??
                 stringAttribute(lineItem, ['architecture', 'processorArchitecture']) ??
                 service.specs),
-            engine: null,
+            engine: supportsEngine(resourceKind) ? sourceEngine : null,
             usageUnit: lineItem?.unit ?? service.usageUnit ?? null,
-            vcpu,
-            memoryGiB,
+            vcpu: vcpu ?? null,
+            memoryGiB: memoryGiB ?? null,
         };
     }
-    async findSourceOffering(provider, nativeSkuName, nativeProductId, region, skuId, meterId) {
-        const byMeter = await this.catalog.findOfferingByMeterIdentity({
+    async findSourceOffering(provider, nativeSkuName, nativeProductId, region, skuId, meterId, engine) {
+        let byMeter = await this.catalog.findOfferingByMeterIdentity({
             provider,
             skuId,
             meterId,
             nativeSkuName,
             region,
         });
+        if (!byMeter && region) {
+            byMeter = await this.catalog.findOfferingByMeterIdentity({
+                provider,
+                skuId,
+                meterId,
+                nativeSkuName,
+            });
+        }
         if (byMeter)
             return byMeter;
         if (!nativeSkuName && !nativeProductId)
@@ -123,6 +151,7 @@ let DeterministicMappingService = class DeterministicMappingService {
             nativeSkuName,
             nativeProductId,
             region,
+            engine,
         });
         if (exact || !region)
             return exact;
@@ -130,6 +159,7 @@ let DeterministicMappingService = class DeterministicMappingService {
             provider,
             nativeSkuName,
             nativeProductId,
+            engine,
         });
     }
     async findTarget(source, targetProvider, targetRegion) {
@@ -173,14 +203,13 @@ let DeterministicMappingService = class DeterministicMappingService {
         const ranked = candidates
             .map((offering) => {
             const score = scoreResource(source, offering);
-            return { offering, score, rankScore: score + lifecyclePenalty(offering) };
+            return {
+                offering,
+                score,
+                rankScore: score + lifecyclePenalty(offering) + semanticPenalty(source, offering),
+            };
         })
             .sort((a, b) => a.rankScore - b.rankScore || a.offering.nativeSkuName.localeCompare(b.offering.nativeSkuName));
-        if (source.resourceKind !== 'COMPUTE_VM' &&
-            source.vcpu == null &&
-            source.memoryGiB == null &&
-            ranked[1]?.rankScore === ranked[0].rankScore)
-            return null;
         const selected = ranked[0];
         const exactCapacity = source.vcpu != null &&
             source.memoryGiB != null &&
@@ -244,6 +273,7 @@ function assignProviderMapping(mapping, offering, metadata) {
             ...metadata,
             service: offering.serviceName,
             shape: offering.nativeSkuName,
+            region: offering.region,
             memoryGb: offering.memoryGiB ?? undefined,
             confidence,
         };
@@ -280,15 +310,43 @@ function lifecyclePenalty(offering) {
         (offering.resourceKind === 'DATA_TRANSFER' && serviceName.includes('function') ? 10 : 0) +
         (name.includes('deprecated') ? 100 : 0);
 }
+function semanticPenalty(source, target) {
+    const sourceText = compact(source.nativeSkuName);
+    const targetText = compact(`${target.nativeSkuName} ${target.displayName} ${target.serviceName}`);
+    if (source.resourceKind === 'SERVERLESS_FUNCTION') {
+        if (/duration|gbsecond/.test(sourceText)) {
+            return /memory|duration|gbsecond/.test(targetText) ? 0 : 5;
+        }
+        return /invocation|request/.test(targetText) ? 0 : 2;
+    }
+    if (source.resourceKind === 'DATA_TRANSFER') {
+        if (/out|egress|bytes/.test(sourceText)) {
+            return /internet|outbound|egress/.test(targetText) &&
+                !/intra|loadbalancer|googleapi/.test(targetText) ? 0 : 4;
+        }
+    }
+    if (source.resourceKind === 'OBSERVABILITY_LOGS') {
+        return /ingest|processing/.test(targetText) ? 0 : 3;
+    }
+    if (source.resourceKind === 'OBJECT_STORAGE') {
+        return /standard|generalpurpose|hot/.test(targetText) ? 0 : 2;
+    }
+    return 0;
+}
 function compatiblePricingUnits(unit) {
     const normalized = (unit ?? '').toLowerCase().replace(/[\s_-]/g, '');
     if (/^(hrs?|hours?|horas?)$/.test(normalized))
         return ['Hrs', 'hour', 'Hour', 'h'];
-    if (['gbsecond', 'gibsecond', 'gibys', 'gbs'].includes(normalized))
-        return ['GB-Second', 'GB-s', 'GiB-s', 'GiBy.s'];
-    if (['gbmo', 'gbmonth', 'gibymo'].includes(normalized))
+    if (/^(s|sec|secs|second|seconds|segundo|segundos)$/.test(normalized))
+        return ['s', 'second', 'seconds'];
+    if (normalized.includes('gbsecond') ||
+        normalized.includes('gibibyte second'.replace(/\s/g, '')) ||
+        ['gibsecond', 'gibys', 'gbs'].includes(normalized))
+        return ['GB-Second', 'Lambda-GB-Second', 'GB-s', 'GiB-s', 'GiBy.s'];
+    if (['gbmo', 'gbmonth', 'gibymo', 'gibibytemo', 'gibibytemonth', 'gigabytemonth'].includes(normalized)) {
         return ['GB-Mo', 'GB-month', 'GiBy.mo'];
-    if (['gb', 'gib', 'giby'].includes(normalized))
+    }
+    if (['gb', 'gib', 'giby', 'gigabyte', 'gibibyte'].includes(normalized))
         return ['GB', 'GiB', 'GiBy'];
     return unit ? [unit] : undefined;
 }
@@ -387,8 +445,86 @@ function normalizeArchitecture(value) {
         return 'x86_64';
     return null;
 }
+function normalizeEngine(value) {
+    const lower = value?.toLowerCase() ?? '';
+    if (lower.includes('postgres'))
+        return 'PostgreSQL';
+    if (lower.includes('mysql'))
+        return 'MySQL';
+    if (lower.includes('valkey'))
+        return 'Valkey';
+    if (lower.includes('redis'))
+        return 'Redis';
+    return null;
+}
+function supportsEngine(resourceKind) {
+    return (resourceKind === 'MANAGED_POSTGRES' ||
+        resourceKind === 'MANAGED_MYSQL' ||
+        resourceKind === 'REDIS_CACHE');
+}
+function inferResourceKind(provider, service, lineItem, engine) {
+    const identity = compact(`${service.name} ${lineItem?.serviceCode ?? ''} ${lineItem?.serviceName ?? ''}`);
+    const usage = `${lineItem?.usageType ?? ''} ${lineItem?.operation ?? ''}`.toLowerCase();
+    const sku = (service.nativeSkuName ?? lineItem?.nativeSkuName ?? '').toLowerCase();
+    if (provider !== 'AWS') {
+        return isComputeService(provider, service, lineItem) ? 'COMPUTE_VM' : null;
+    }
+    if (identity.includes('amazonrds') && sku.startsWith('db.')) {
+        if (engine === 'MySQL')
+            return 'MANAGED_MYSQL';
+        if (engine === 'PostgreSQL')
+            return 'MANAGED_POSTGRES';
+    }
+    if ((identity.includes('amazonelasticache') ||
+        identity.includes('amazonmemorydb')) &&
+        (engine === 'Redis' || engine === 'Valkey')) {
+        return 'REDIS_CACHE';
+    }
+    if (identity.includes('amazonec2')) {
+        if (/^[a-z][a-z0-9-]*\.[a-z0-9]+$/.test(sku))
+            return 'COMPUTE_VM';
+        if (/ebs.*volume|volume(?:usage|p-iops|p-throughput)/.test(usage)) {
+            return 'BLOCK_STORAGE';
+        }
+        if (/transfer|(?:out|regional)-bytes/.test(usage))
+            return 'DATA_TRANSFER';
+    }
+    if (identity.includes('amazons3') || identity.includes('amazonglacier')) {
+        return 'OBJECT_STORAGE';
+    }
+    if (identity.includes('amazoncloudwatch') && /log|data(?:processing|scanned|ingestion)/.test(usage)) {
+        return 'OBSERVABILITY_LOGS';
+    }
+    if (identity.includes('awslambda') && /duration|gb-second|gbsecond/.test(usage)) {
+        return 'SERVERLESS_FUNCTION';
+    }
+    if (identity.includes('awselasticloadbalancing') || identity.includes('elasticloadbalancing')) {
+        return /bytes|data/.test(usage) ? 'DATA_TRANSFER' : 'LOAD_BALANCER';
+    }
+    if (identity.includes('awswaf'))
+        return 'WAF';
+    if (identity.includes('kubernetes') || identity.includes('amazoneks'))
+        return 'KUBERNETES';
+    if (identity.includes('awsdatatransfer') || identity.includes('amazoncloudfront')) {
+        return 'DATA_TRANSFER';
+    }
+    return null;
+}
 function compact(value) {
     return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+async function mapWithConcurrency(values, concurrency, worker) {
+    const results = new Array(values.length);
+    let next = 0;
+    const runners = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+        while (next < values.length) {
+            const index = next;
+            next += 1;
+            results[index] = await worker(values[index]);
+        }
+    });
+    await Promise.all(runners);
+    return results;
 }
 function isComputeService(provider, service, lineItem) {
     const identities = [
